@@ -25,7 +25,7 @@ from .clients.pbs import PBSClient
 from .clients.pve import PVEClient
 from .clients.ssh import SSHClientPool
 from .config import Settings
-from .errors import PolicyError, PVEHubError
+from .errors import InvalidArgument, NotFound, PolicyError, PVEHubError
 from .policy import Category, Policy
 from .tools.common import dumps, fail
 
@@ -170,11 +170,11 @@ class PVEHub:
         self, kind: str, instance: str | None, clients: dict[str, Any]
     ) -> str:
         if not clients:
-            raise PVEHubError(f"no {kind.upper()} instance configured")
+            raise InvalidArgument(f"no {kind.upper()} instance configured")
         if instance is None:
             return next(iter(clients))
         if instance not in clients:
-            raise PVEHubError(
+            raise InvalidArgument(
                 f"unknown {kind.upper()} instance {instance!r}; configured: {', '.join(clients)}"
             )
         return instance
@@ -186,7 +186,7 @@ class PVEHub:
             for resource in resources:
                 if isinstance(resource, dict) and resource.get("vmid") == vmid:
                     return resource
-        raise PVEHubError(f"guest {vmid} not found in PVE instance {client.name}")
+        raise NotFound(f"guest {vmid} not found in PVE instance {client.name}")
 
     async def resolve_node(self, node: str, instance: str | None = None) -> dict[str, Any]:
         client = self.pve(instance)
@@ -195,7 +195,7 @@ class PVEHub:
             for item in nodes:
                 if isinstance(item, dict) and item.get("node") == node:
                     return item
-        raise PVEHubError(f"node {node!r} not found in PVE instance {client.name}")
+        raise NotFound(f"node {node!r} not found in PVE instance {client.name}")
 
     # -- registration ------------------------------------------------------
     def tool(
