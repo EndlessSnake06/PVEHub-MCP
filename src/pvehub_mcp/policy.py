@@ -231,7 +231,14 @@ class Policy:
         return ToolDecision(True)
 
     # -- per call ----------------------------------------------------------
-    def check_call(self, name: str, category: Category, args: dict[str, Any]) -> None:
+    def check_call(
+        self,
+        name: str,
+        category: Category,
+        args: dict[str, Any],
+        *,
+        dry_run_supported: bool = True,
+    ) -> None:
         decision = self.tool_decision(name, category)
         if not decision.allowed:
             raise PolicyError(
@@ -244,7 +251,7 @@ class Policy:
             self._check_vmid_arg(name, args)
         if category in self.file.safety.require_confirm_for:
             dry_run = bool(args.get("dry_run"))
-            if dry_run and self.file.safety.dry_run_supported:
+            if dry_run and self.file.safety.dry_run_supported and dry_run_supported:
                 return
             if not args.get("confirm"):
                 raise ConfirmRequired(

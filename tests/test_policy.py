@@ -39,6 +39,13 @@ def test_confirm_required_and_dry_run_bypass() -> None:
         policy.check_call("pve_guest_delete", "destructive", {"vmid": 100})
     policy.check_call("pve_guest_delete", "destructive", {"vmid": 100, "confirm": True})
     policy.check_call("pve_guest_delete", "destructive", {"vmid": 100, "dry_run": True})
+    with pytest.raises(ConfirmRequired):
+        policy.check_call(
+            "pve_guest_delete",
+            "destructive",
+            {"vmid": 100, "dry_run": True},
+            dry_run_supported=False,
+        )
 
 
 def test_allowed_vmids() -> None:

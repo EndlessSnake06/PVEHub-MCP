@@ -217,7 +217,9 @@ Notes:
 - Destructive and exec tools require `confirm=true`; destructive tools support `dry_run`
   where the API does.
 - The generic API bridge always denies ticket/console endpoints (`/access/ticket`,
-  token endpoints, `vncshell`, `spiceshell`, `termproxy`, QEMU `monitor`).
+  token endpoints, `vncshell`, `spiceshell`, `termproxy`, QEMU `monitor`) and the
+  guest-agent `exec`/`file-write` endpoints; use `exec_vm` / `file_write_guest` for those.
+  Non-GET generic calls require `confirm=true`.
 - Audit JSONL is written to `/data/audit.jsonl` with secret redaction; result bodies are
   opt-in (`PVEHUB_AUDIT_INCLUDE_RESULTS=true`).
 - The container runs as UID 10001, read-only root filesystem, `cap_drop: ALL`,

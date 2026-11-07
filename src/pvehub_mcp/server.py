@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import inspect
 import json
 import logging
 import secrets
@@ -348,7 +349,10 @@ class PVEHub:
             target = _target(kwargs)
             status = "ok"
             try:
-                self.policy.check_call(name, category, kwargs)
+                supports_dry_run = "dry_run" in inspect.signature(fn).parameters
+                self.policy.check_call(
+                    name, category, kwargs, dry_run_supported=supports_dry_run
+                )
                 if pve:
                     pve_client = self.pve(instance)
                     self.capabilities.check_pve(pve_client.name, pve, kwargs)  # type: ignore[union-attr]

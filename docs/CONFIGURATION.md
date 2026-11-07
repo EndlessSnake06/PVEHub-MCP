@@ -388,8 +388,10 @@ safety:
 
 Always hard-denied through the generic bridge, regardless of policy: `/access/ticket`,
 `/access/users/*/token`, `/access/users/*/token/*`, `/nodes/*/vncshell`,
-`/nodes/*/spiceshell`, `/nodes/*/termproxy`, `/nodes/*/qemu/*/monitor`. These return
-session tickets or interactive consoles and would bypass tool-level gating.
+`/nodes/*/spiceshell`, `/nodes/*/termproxy`, `/nodes/*/qemu/*/monitor`, and the
+guest-agent `exec`/`file-write` endpoints. These return session tickets, interactive
+consoles or shell-equivalent access and would bypass tool-level gating. Non-GET generic
+calls require `confirm=true`.
 
 Policy is enforced twice: at registration (blocked tools do not appear in
 `tools/list`) and on every call. Changing policy requires a restart.
