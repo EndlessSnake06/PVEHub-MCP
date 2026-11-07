@@ -33,9 +33,29 @@ def test_non_loopback_requires_auth_token() -> None:
         Settings(pve=[_pve()], transport="http", host="0.0.0.0")
 
 
-def test_loopback_without_token_is_allowed() -> None:
-    settings = Settings(pve=[_pve()], transport="http", host="127.0.0.1")
+def test_loopback_without_token_is_rejected_by_default() -> None:
+    with pytest.raises(ValidationError, match="PVEHUB_MCP_AUTH"):
+        Settings(pve=[_pve()], transport="http", host="127.0.0.1")
+
+
+def test_loopback_without_token_opt_out_is_allowed() -> None:
+    settings = Settings(
+        pve=[_pve()],
+        transport="http",
+        host="127.0.0.1",
+        mcp_auth_required=False,
+    )
     assert settings.mcp_auth_token is None
+
+
+def test_non_loopback_without_token_opt_out_still_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            pve=[_pve()],
+            transport="http",
+            host="0.0.0.0",
+            mcp_auth_required=False,
+        )
 
 
 def test_http_url_requires_explicit_opt_in() -> None:

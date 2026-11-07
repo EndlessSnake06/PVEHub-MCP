@@ -302,6 +302,8 @@ def build_settings(tmp_path: Path, policy_text: str = POLICY) -> Settings:
     known_hosts.write_text("", encoding="utf-8")
     return Settings.model_validate(
         {
+            # stdio: these tests exercise tool registration, not the HTTP listener.
+            "transport": "stdio",
             "pve": [
                 {
                     "name": "test",

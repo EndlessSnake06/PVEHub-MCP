@@ -75,8 +75,12 @@ available, what policy blocks and what the token is missing.
 ## Clients
 
 The server speaks **Streamable HTTP** at `http://<host>:8080/mcp` with
-`Authorization: Bearer <PVEHUB_MCP_AUTH_TOKEN>`, or **stdio** when started with
-`--transport stdio` / `PVEHUB_TRANSPORT=stdio` (no listener, no bearer token).
+`Authorization: Bearer <PVEHUB_MCP_AUTH_TOKEN>`; the http
+transport **refuses to start without** `PVEHUB_MCP_AUTH_TOKEN` (any bind
+address). `PVEHUB_MCP_AUTH_REQUIRED=false` is an explicit opt-out for loopback
+development setups only (warning logged at startup). Or **stdio** when started
+with `--transport stdio` / `PVEHUB_TRANSPORT=stdio` (no listener, no bearer
+token).
 
 ### Claude Code / generic HTTP client
 
@@ -207,8 +211,10 @@ Notes:
 ## Security (short version)
 
 - Bind the MCP port to LAN/VPN only; put TLS in front of it (reverse proxy).
-- Always set `PVEHUB_MCP_AUTH_TOKEN` for non-loopback binds; the server refuses to start
-  without it.
+- The http transport **refuses to start without `PVEHUB_MCP_AUTH_TOKEN`** (any
+  bind address). `PVEHUB_MCP_AUTH_REQUIRED=false` is an explicit, logged
+  opt-out for loopback development setups only; a non-loopback bind without a
+  token is refused even with the opt-out.
 - Use a dedicated PVE/PBS API token with the minimum ACLs and no expiry surprises.
 - Start with `config/examples/readonly.yaml`; widen to `operator.yaml` when needed.
   `admin.yaml` (destructive + host shells) is for trusted single-operator setups only.
@@ -230,6 +236,7 @@ Notes:
 | Symptom | Cause / fix |
 |---|---|
 | `refusing to bind a non-loopback address without mcp_auth_token` | Set `PVEHUB_MCP_AUTH_TOKEN` (non-empty) or bind to `127.0.0.1` |
+| `mcp_auth_token is required for the http transport` | Set `PVEHUB_MCP_AUTH_TOKEN` (see `docs/CONFIGURATION.md`), or `PVEHUB_MCP_AUTH_REQUIRED=false` for loopback development setups |
 | `configuration error: ... extra_forbidden` | Unknown YAML key; compare with `docs/CONFIGURATION.md`. `extra="forbid"` is intentional |
 | `policy error: ... invalid policy` | Unknown category or key in `policy.yaml`; valid categories are `read`, `lifecycle`, `write`, `destructive`, `exec`, `generic` |
 | `401 unauthorized` on `/mcp` | Missing/wrong `Authorization: Bearer ...` header |
