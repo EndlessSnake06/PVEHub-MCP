@@ -19,7 +19,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from .audit import AuditLogger
+from .audit import AuditLogger, redact_value
 from .capabilities import CapabilityManager, Privilege
 from .clients.pbs import PBSClient
 from .clients.pve import PVEClient
@@ -508,16 +508,45 @@ class BearerAuthMiddleware:
         await self.app(scope, receive, send)
 
 
-def build_http_app(hub: PVEHub) -> Starlette:
-    transport_security = None
-    if hub.settings.allowed_hosts:
-        transport_security = TransportSecuritySettings(
+def _transport_security(settings: Settings) -> TransportSecuritySettings:
+    """Build DNS-rebinding settings.
+
+    A loopback-only server is the default and needs no bearer token, so it must
+    still reject foreign ``Host`` headers (a browser can be tricked into talking
+    to 127.0.0.1 via DNS rebinding).  For non-loopback binds the operator has to
+    list the hostnames clients use; an empty list keeps the old behaviour and
+    logs a warning because the bearer token is the only remaining control.
+    """
+
+    if settings.allowed_hosts:
+        return TransportSecuritySettings(
             enable_dns_rebinding_protection=True,
-            allowed_hosts=hub.settings.allowed_hosts,
-            allowed_origins=hub.settings.allowed_hosts,
+            allowed_hosts=list(settings.allowed_hosts),
+            allowed_origins=list(settings.allowed_hosts),
         )
-    else:
-        transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    if settings.host in {"127.0.0.1", "::1", "localhost"}:
+        hosts = [
+            "127.0.0.1",
+            "127.0.0.1:*",
+            "localhost",
+            "localhost:*",
+            "[::1]",
+            "[::1]:*",
+        ]
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=hosts,
+            allowed_origins=hosts,
+        )
+    logger.warning(
+        "DNS-rebinding protection is disabled (allowed_hosts is empty); "
+        "set PVEHUB_ALLOWED_HOSTS to the hostnames clients use"
+    )
+    return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+
+def build_http_app(hub: PVEHub) -> Starlette:
+    transport_security = _transport_security(hub.settings)
     app = hub.mcp.streamable_http_app(
         streamable_http_path="/mcp",
         stateless_http=False,
@@ -542,7 +571,8 @@ def _target(kwargs: dict[str, Any]) -> str | None:
     for key in ("vmid", "node", "store", "name", "path", "command"):
         value = kwargs.get(key)
         if value is not None:
-            return f"{key}={value}"
+            redacted = redact_value(f"{key}={value}")
+            return redacted if isinstance(redacted, str) else str(redacted)
     return None
 
 
