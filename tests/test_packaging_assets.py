@@ -104,7 +104,7 @@ def test_dockerfile_contract() -> None:
 def test_ci_workflow_has_required_jobs() -> None:
     workflow = yaml.safe_load((ROOT / ".gitea" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
     jobs = workflow["jobs"]
-    assert set(jobs) == {"lint", "typecheck", "test", "docker"}
+    assert set(jobs) == {"lint", "typecheck", "test", "docker", "compose"}
     assert "uv run ruff check src tests" in jobs["lint"]["steps"][-1]["run"]
     assert "uv run mypy src" in jobs["typecheck"]["steps"][-1]["run"]
     assert "uv run pytest" in jobs["test"]["steps"][-1]["run"]

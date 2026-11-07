@@ -76,3 +76,46 @@ jobs:
       - name: Build image
         if: steps.docker.outputs.available == 'true'
         run: docker build --pull -t pvehub-mcp:ci .
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Check Docker availability
+        id: docker
+        run: |
+          if docker info >/dev/null 2>&1; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::warning::No Docker daemon on this runner; skipping compose smoke"
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Prepare compose environment
+        if: steps.docker.outputs.available == 'true'
+        run: |
+          cp .env.example .env
+          sed -i 's/^PVEHUB_MCP_AUTH_TOKEN=.*/PVEHUB_MCP_AUTH_TOKEN=ci-smoke-token-0123456789/' .env
+          sed -i 's#^PVEHUB_PVE_URL=.*#PVEHUB_PVE_URL=https://127.0.0.1:8006#' .env
+          sed -i 's#^PVEHUB_PBS_URL=.*#PVEHUB_PBS_URL=https://127.0.0.1:8007#' .env
+          mkdir -p config ssh
+          cp config/examples/readonly.yaml config/policy.yaml
+      - name: Compose config
+        if: steps.docker.outputs.available == 'true'
+        run: docker compose config >/dev/null
+      - name: Compose smoke
+        if: steps.docker.outputs.available == 'true'
+        run: |
+          docker compose up -d --build
+          for attempt in $(seq 1 90); do
+            if docker compose exec -T pvehub-mcp python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).status == 200 else 1)"; then
+              docker compose ps
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+      - name: Stop compose
+        if: always() && steps.docker.outputs.available == 'true'
+        run: docker compose down -v || true
