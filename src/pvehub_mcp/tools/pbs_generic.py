@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .common import ok, parse_vmid_from_upid
+from .common import ok, parse_upid_node
 
 
 def register(hub: Any) -> None:
@@ -39,7 +39,7 @@ def register(hub: Any) -> None:
         result = await client._request(method.upper(), path, params=params, data=params)
         payload: dict[str, Any] = {"method": method.upper(), "path": path, "result": result}
         if wait and isinstance(result, str) and result.startswith("UPID:"):
-            node = parse_vmid_from_upid(result) or "localhost"
+            node = parse_upid_node(result) or "localhost"
             payload["task"] = await client.wait_task(
                 node,
                 result,

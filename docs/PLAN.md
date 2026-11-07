@@ -26,21 +26,24 @@ and every tool/category can be blocked through configuration.
 
 ## Phase 1 — Core
 
-- [ ] `config.py`: env + YAML settings, profiles, validation, TLS options.
-- [ ] `policy.py`: categories, allow/deny, read-only, generic path/method rules, exec gates.
-- [ ] `audit.py`: JSONL audit trail with secret redaction and output limits.
-- [ ] `clients/pve.py`, `clients/pbs.py`: auth, retries, timeouts, task/UPID polling, schema cache.
-- [ ] `server.py`: Streamable HTTP at `/mcp`, stdio transport, bearer auth, `/health`.
-- [ ] Policy unit tests.
+- [x] `config.py`: env + YAML settings, profiles, validation, TLS options.
+- [x] `policy.py`: categories, allow/deny, read-only, generic path/method rules, exec gates.
+- [x] `audit.py`: JSONL audit trail with secret redaction and output limits.
+- [x] `clients/pve.py`, `clients/pbs.py`: auth, retries, timeouts, task/UPID polling, schema cache.
+- [x] `server.py`: Streamable HTTP at `/mcp`, stdio transport, bearer auth, `/health`.
+- [x] Policy unit tests.
 
-**Acceptance:** server starts, `tools/list` works, policy tests green.
+**Acceptance:** server starts, `tools/list` works, policy tests green. ✅ (verified 2026-11-07:
+43 unit tests, ruff/mypy clean, HTTP `/health` + bearer 401 + MCP initialize against a local server)
 
 ## Phase 2 — Capabilities
 
-- [ ] PVE + PBS permission discovery (`/access/permissions`), periodic refresh.
-- [ ] Tool ↔ privilege mapping, registration filtering, per-call pre-check.
-- [ ] `pvehub_capabilities` tool (available / policy-blocked / missing token rights).
-- [ ] Tests: full access, audit-only, single-path token, discovery failure.
+- [x] PVE + PBS permission discovery (`/access/permissions`), periodic refresh.
+- [x] Tool ↔ privilege mapping, registration filtering, per-call pre-check.
+- [x] `pvehub_capabilities` tool (available / policy-blocked / missing token rights).
+- [x] Tests: full access, audit-only, single-path token, discovery failure.
+
+**Acceptance:** mock permission matrices tested; live discovery requires real tokens (not provided).
 
 ## Phase 3 — PVE tools
 

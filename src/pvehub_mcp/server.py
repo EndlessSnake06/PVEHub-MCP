@@ -7,6 +7,7 @@ import json
 import logging
 import secrets
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -148,6 +149,7 @@ class PVEHub:
         )
         return self._mcp
 
+    @asynccontextmanager
     async def _lifespan(self, _server: MCPServer) -> Any:
         await self.initialize()
         try:

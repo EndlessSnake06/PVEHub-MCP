@@ -159,7 +159,7 @@ def parse_bool(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def parse_vmid_from_upid(upid: str) -> str | None:
+def parse_upid_node(upid: str) -> str | None:
     parts = upid.split(":")
     if len(parts) >= 3 and parts[0] == "UPID":
         return parts[1] or None
