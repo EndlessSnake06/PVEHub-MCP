@@ -182,6 +182,11 @@ async def test_file_pull_host_returns_base64(
 
     monkeypatch.setattr(exec_env.hub.ssh, "read_file", fake_read)
 
+    async def fake_realpath(target: Any, path: str, *, for_write: bool = False) -> str:
+        return path
+
+    monkeypatch.setattr(exec_env.hub.ssh, "realpath", fake_realpath)
+
     result = await exec_env.call(
         "file_pull_host", node="pve1", remote_path="/etc/pve/nodes/pve1/config"
     )
@@ -203,6 +208,11 @@ async def test_file_pull_host_caps_max_bytes(
         return b""
 
     monkeypatch.setattr(exec_env.hub.ssh, "read_file", fake_read)
+
+    async def fake_realpath(target: Any, path: str, *, for_write: bool = False) -> str:
+        return path
+
+    monkeypatch.setattr(exec_env.hub.ssh, "realpath", fake_realpath)
 
     await exec_env.call(
         "file_pull_host", node="pve1", remote_path="/etc/pve/x", max_bytes=99 * 1024 * 1024
@@ -240,6 +250,11 @@ async def test_file_pull_host_rejects_oversized_file(
 
     monkeypatch.setattr(exec_env.hub.ssh, "read_file", fake_read)
 
+    async def fake_realpath(target: Any, path: str, *, for_write: bool = False) -> str:
+        return path
+
+    monkeypatch.setattr(exec_env.hub.ssh, "realpath", fake_realpath)
+
     result = await exec_env.call("file_pull_host", node="pve1", remote_path="/etc/pve/x")
 
     assert result["ok"] is False
@@ -255,6 +270,11 @@ async def test_file_push_host_writes_decoded_bytes(
         captured.update(target=target, path=remote_path, data=data, max_bytes=max_bytes)
 
     monkeypatch.setattr(exec_env.hub.ssh, "write_file", fake_write)
+
+    async def fake_realpath(target: Any, path: str, *, for_write: bool = False) -> str:
+        return path
+
+    monkeypatch.setattr(exec_env.hub.ssh, "realpath", fake_realpath)
 
     result = await exec_env.call(
         "file_push_host",

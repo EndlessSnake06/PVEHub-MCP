@@ -63,6 +63,24 @@ def _check_max_bytes(max_bytes: int) -> int:
     return min(max_bytes, MAX_FILE_BYTES)
 
 
+async def _resolve_host_path(
+    hub: Any, target: Any, remote_path: str, *, for_write: bool
+) -> str:
+    """Re-check the resolved (symlink-free) path against ``allowed_roots``.
+
+    ``policy.check_file_path`` compares strings, so a symlink that lives inside an
+    allowed root but points outside of it would pass.  Asking the SFTP server for
+    the canonical path closes that gap.  The check is skipped when no roots are
+    configured (the documented "unrestricted" mode).
+    """
+
+    if not hub.policy.file.exec.files.allowed_roots:
+        return remote_path
+    resolved = await hub.ssh.realpath(target, remote_path, for_write=for_write)
+    hub.policy.check_file_path(resolved)
+    return str(resolved)
+
+
 def _decode_base64(
     content_base64: str, *, limit: int, field: str = "content_base64"
 ) -> bytes:
@@ -231,7 +249,8 @@ def register(hub: Any) -> None:
         limit = _check_max_bytes(max_bytes)
         hub.policy.check_file_path(remote_path)
         target = hub.ssh.node_target(node)
-        data = await hub.ssh.read_file(target, remote_path, max_bytes=limit)
+        read_path = await _resolve_host_path(hub, target, remote_path, for_write=False)
+        data = await hub.ssh.read_file(target, read_path, max_bytes=limit)
         return ok(
             {
                 "node": node,
@@ -266,7 +285,8 @@ def register(hub: Any) -> None:
         data = _decode_base64(content_base64, limit=MAX_FILE_BYTES)
         hub.policy.check_file_path(remote_path)
         target = hub.ssh.node_target(node)
-        await hub.ssh.write_file(target, remote_path, data, max_bytes=MAX_FILE_BYTES)
+        write_path = await _resolve_host_path(hub, target, remote_path, for_write=True)
+        await hub.ssh.write_file(target, write_path, data, max_bytes=MAX_FILE_BYTES)
         return ok(
             {
                 "node": node,
