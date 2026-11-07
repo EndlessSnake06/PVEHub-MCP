@@ -36,8 +36,8 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
 | Tool catalog | 74 tools generated from source; 69 registered with a full mock permission set, 5 shell/file tools correctly blocked without SSH configuration |
 | Package build | `uv build --wheel`; wheel installed into a fresh venv, `pvehub-mcp --version` → `0.1.0` |
 | Independent security review | `docs/SECURITY_REVIEW.md`; 15 findings, 10 fixed with regression tests, 5 accepted/justified; post-merge gate **250 passed, 2 skipped** |
-| Docker image build | Gitea Actions run 2680: four jobs (lint, typecheck, test, docker) succeeded; `docker build --pull -t pvehub-mcp:ci .` completed and exported the image (`sha256:8039896c…`) |
-| CI test gate | Gitea Actions run 2680: `250 passed, 2 skipped` on the runner |
+| Docker image build | Gitea Actions run 2681: four jobs (lint, typecheck, test, docker) succeeded; `docker build --pull -t pvehub-mcp:ci .` completed and exported the image (`sha256:45b13474…`) |
+| CI test gate | Gitea Actions run 2681: `250 passed, 2 skipped` on the runner |
 
 ## Mocked only
 
