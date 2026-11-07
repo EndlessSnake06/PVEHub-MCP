@@ -60,7 +60,8 @@ PVEHUB_PBS_TOKEN_SECRET=<token secret>
 PVEHUB_POLICY_FILE=/config/policy.yaml
 ```
 
-Startup refuses a non-loopback `PVEHUB_HOST` without `PVEHUB_MCP_AUTH_TOKEN`, refuses
+Startup refuses a non-loopback `PVEHUB_HOST` without `PVEHUB_MCP_AUTH_TOKEN`, rejects
+tokens shorter than 16 characters, refuses
 `http://` instance URLs unless `PVEHUB_ALLOW_INSECURE_HTTP=true`, and requires at
 least one PVE or PBS instance.
 

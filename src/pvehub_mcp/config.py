@@ -213,7 +213,7 @@ class Settings(BaseModel):
     capabilities_refresh_seconds: int = 300
     capabilities_fail_open: bool = True
     wait_default: bool = True
-    log_level: str = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     allow_insecure_http: bool = False
 
     @model_validator(mode="after")

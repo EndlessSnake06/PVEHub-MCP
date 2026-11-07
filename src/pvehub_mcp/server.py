@@ -145,7 +145,7 @@ class PVEHub:
                 "Shell tools require SSH (LXC/host/PBS) or a running QEMU guest agent (VMs)."
             ),
             lifespan=self._lifespan,
-            log_level=self.settings.log_level,  # type: ignore[arg-type]
+            log_level=self.settings.log_level,
         )
         return self._mcp
 
