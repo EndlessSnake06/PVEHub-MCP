@@ -27,11 +27,14 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
 | Python package install | `uv sync --extra dev` |
 | Lint | `uv run ruff check src tests` — clean |
 | Typecheck | `uv run mypy src` — clean |
-| Unit/contract tests | `uv run pytest -q` — see final test count in the release report |
+| Unit/contract tests | `uv run pytest -o addopts="" -q` — **218 passed, 2 skipped** (integration) |
 | HTTP transport | local uvicorn start, `GET /health` → 200 JSON, `POST /mcp` without token → 401, with token → MCP `initialize` result |
+| stdio transport | real subprocess via MCP client: `tools/list` → 69 tools, `pvehub_health` call |
 | TLS fingerprint pinning | real TLS handshake against `10.0.10.3:8006`; correct SHA-256 accepted, wrong fingerprint rejected |
 | PVE/PBS API schema | live `apidoc.js` fetched and parsed for endpoint/parameter verification |
 | Policy gates | unit tests for read-only, deny lists, confirm, dry-run, VMID ranges, path traversal/encoding, command denylist |
+| Tool catalog | 74 tools generated from source; 69 registered with a full mock permission set, 5 shell/file tools correctly blocked without SSH configuration |
+| Package build | `uv build --wheel`; wheel installed into a fresh venv, `pvehub-mcp --version` → `0.1.0` |
 
 ## Mocked only
 
