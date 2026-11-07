@@ -38,6 +38,7 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
 | Independent security review | `docs/SECURITY_REVIEW.md`; 15 findings, 10 fixed with regression tests, 5 accepted/justified; post-merge gate **250 passed, 2 skipped** |
 | Docker image build | Gitea Actions run 2681: four jobs (lint, typecheck, test, docker) succeeded; `docker build --pull -t pvehub-mcp:ci .` completed and exported the image (`sha256:45b13474…`) |
 | CI test gate | Gitea Actions run 2681: `250 passed, 2 skipped` on the runner |
+| Compose runtime smoke | Gitea Actions compose job: `docker compose config`, `docker compose up -d --build`, `/health` 200 inside the container, `docker compose down -v`; policy `readonly.yaml` loaded |
 
 ## Mocked only
 
@@ -49,10 +50,11 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
 
 ## Not tested
 
-- `docker compose up` runtime and container hardening checks — no Docker daemon in the build
-  sandbox. The image build itself was executed successfully by the Gitea runner (see above);
-  compose runtime and `docker inspect` checks were not run.
+- Container hardening inspection (`docker inspect`: read-only rootfs, capabilities, UID) — the
+  compose smoke ran the container but did not assert every runtime flag.
 - Multi-arch build (amd64/arm64) — the CI runner built the host architecture only.
+- Healthcheck transition from `starting` to `healthy` — the smoke asserted `/health` 200 inside
+  the container, not Docker's health status after the 30 s start period.
 - Live PVE/PBS permission discovery with a real token.
 - Real SSH host-key verification and `pct exec` on a node.
 - Behaviour against PBS versions older than the test server's API schema.
