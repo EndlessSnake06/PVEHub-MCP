@@ -7,6 +7,12 @@ versioning: Semantic Versioning.
 
 ### Added
 
+- `hub.tool(..., title="...")`: optional human-readable display title for a tool
+  (issue #22). When omitted, the title is derived from the technical name by
+  `pvehub_mcp.toolnaming` with consistent, acronym-aware labels
+  (`pve_guest_delete` -> `PVE Guest Delete`, `pvehub_health` -> `PVEHub Health`).
+  The derived title is the default; the `title` decorator argument is the
+  documented override point.
 - Per-client MCP tokens: `PVEHUB_MCP_AUTH_TOKENS` / `mcp_auth_tokens` (D019, issue #21).
   The legacy `PVEHUB_MCP_AUTH_TOKEN` keeps working (exposed to the middleware under the
   reserved client name `default`); named tokens add per-client revocation — rotating one
@@ -49,6 +55,19 @@ versioning: Semantic Versioning.
 - `GET /health` is now a minimal liveness probe: the body is exactly `{"status": "ok"}`
   (always `200` while the process runs) and no longer exposes the version, transport or
   tool count (issue #24).
+- `tools/list` now exposes, for every tool, a readable `title` (previously the
+  snake_case technical name, which MCP clients rendering `title` showed verbatim)
+  in both `title` and `annotations.title`, plus a `_meta` object carrying
+  `category` and `confirm_required`, so clients can group tools and detect
+  confirm-gated tools from the tool list alone (issue #22).
+- Tools whose category is covered by `safety.require_confirm_for` (default:
+  `destructive` and `exec`) now carry a stable note in the tool description:
+  `This tool is protected: the call is rejected unless confirm=true is passed.`
+  (plus a `dry_run` mention where the tool supports it). Agents that read only
+  `tools/list` no longer hit avoidable `confirm required` denials.
+- `docs/TOOLS.md` (and `make docs-tools`) now renders the derived titles in a
+  `Title` column and the confirm note for the default confirm categories, and
+  the doc generator honors a literal `title=` override (issue #22).
 
 ### Security
 

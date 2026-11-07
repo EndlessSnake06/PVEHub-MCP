@@ -285,6 +285,35 @@ deployments remain `unhealthy` (no HTTP listener) — expected and documented. T
 supersedes the `/health` remark in D018 and resolves F-13 of the security review (see
 the 0.1.1 addendum in `docs/SECURITY_REVIEW.md`).
 
+## D022 — Tool labeling: readable titles (derived, overridable), confirm requirement in description, category in _meta
+
+**Context:** `PVEHub._register` set `ToolAnnotations(title=name)`, so `tools/list`
+exposed the snake_case technical name as the display title, and no client-visible
+annotation existed for the `confirm=true` requirement of categories in
+`safety.require_confirm_for`. Agents that only consumed `tools/list` (schema plus
+annotations) produced avoidable `confirm required` denials, and the category was
+only indirectly recoverable from three boolean hints (issue #22).
+
+**Decision:** Every registered tool now carries a readable `title` in `title` and
+`annotations.title`, plus `_meta` = `{"category": <category>, "confirm_required":
+<bool>}`. The title is derived from the name by `pvehub_mcp.toolnaming.derive_title`
+(a pure, stdlib-only module: acronym map PVE/PBS/LXC/VM/..., the `pvehub_` brand
+prefix mapped to the single word `PVEHub`, title-casing of all other words); the
+derived title is the default and `hub.tool(..., title="...")` is the documented
+override point. No per-tool hand-written titles ship in this release. The confirm
+requirement is appended to the tool description as a stable, greppable note
+(`This tool is protected: the call is rejected unless confirm=true is passed.`,
+plus a `dry_run` mention where the tool's signature supports it), computed from the
+effective policy at registration. The category/confirm flag travel in `_meta`
+rather than new annotation fields because `ToolAnnotations` is a fixed MCP schema
+and `meta`/`_meta` is the spec's extension channel for exactly this.
+`scripts/generate_tool_docs.py` mirrors the derivation and the note (static AST scan,
+it cannot import the server; the mirrored constants are kept in sync deliberately)
+and `docs/TOOLS.md` gained a `Title` column plus the note for the default confirm
+categories. The `RegisteredTool` record gained `title` and `confirm_required`;
+existing consumers (capabilities report, tests) read only `name`/`category`/
+`pve_privileges` and are unaffected.
+
 ## D023 — Audit completeness: rotation, write-error surfacing, full target/error records (issues #18, #19)
 
 **Context:** 0.1.0 audit entries were incomplete and the log was unmanaged. (a) The

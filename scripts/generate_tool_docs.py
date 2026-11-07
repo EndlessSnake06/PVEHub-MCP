@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate the tool catalog from ``@hub.tool(...)`` declarations.
 
-The scan is purely static (Python ``ast``): it never imports the server, never
+The scan is purely static (Python ``ast``): it never imports the server (only
+the side-effect-free ``toolnaming`` helper, which is stdlib-only), never
 contacts PVE or PBS and therefore works while tool modules are still stubs.
 Only literal decorator arguments are read; computed values are reported as
 ``?`` with a warning on stderr.
@@ -23,8 +24,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pvehub_mcp.toolnaming import derive_title
+
 CATEGORY_ORDER = ("read", "lifecycle", "write", "destructive", "exec", "generic")
 EMPTY = "—"
+
+# Static mirrors of the runtime values in ``pvehub_mcp.server`` /
+# ``pvehub_mcp.policy``. The generator must stay a pure static scan, so it
+# cannot import the policy engine; keep these in sync with
+# ``_default_confirm_categories()`` and the CONFIRM_* notes in ``server.py``.
+DEFAULT_REQUIRE_CONFIRM: tuple[str, ...] = ("destructive", "exec")
+CONFIRM_NOTE = "This tool is protected: the call is rejected unless confirm=true is passed."
+CONFIRM_DRY_RUN_NOTE = " Use dry_run=true to preview the effect without executing."
 
 
 @dataclass
@@ -32,12 +43,14 @@ class Tool:
     module: str
     name: str
     category: str
+    title: str
     pve: list[tuple[str, str]] = field(default_factory=list)
     pbs: list[tuple[str, str]] = field(default_factory=list)
     shell: str | None = None
     service: str | None = None
     description: str = ""
     lineno: int = 0
+    dry_run: bool = False
 
 
 def _literal(node: ast.AST, where: str, warnings: list[str]) -> Any:
@@ -76,6 +89,11 @@ def _docstring_summary(node: ast.AST) -> str:
         if line:
             return " ".join(line.split())
     return ""
+
+
+def _param_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    args = node.args
+    return {arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
 
 
 def _tool_decorator(node: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.Call | None:
@@ -126,17 +144,27 @@ def _collect(path: Path, warnings: list[str]) -> tuple[list[Tool], bool]:
         shell = kwargs.get("shell")
         service = kwargs.get("service")
 
+        raw_title = kwargs.get("title")
+        if raw_title is not None and not isinstance(raw_title, str):
+            warnings.append(f"{where}: non-literal title for {name!r}, deriving from name")
+            raw_title = None
+        title = raw_title if isinstance(raw_title, str) else derive_title(name)
+
+        params = _param_names(node)
+
         tools.append(
             Tool(
                 module=path.stem,
                 name=name,
                 category=category,
+                title=title,
                 pve=_pairs(kwargs.get("pve"), f"{where} ({name}.pve)", warnings),
                 pbs=_pairs(kwargs.get("pbs"), f"{where} ({name}.pbs)", warnings),
                 shell=shell if isinstance(shell, str) else None,
                 service=service if isinstance(service, str) else None,
                 description=_docstring_summary(node),
                 lineno=node.lineno,
+                dry_run="dry_run" in params,
             )
         )
     return tools, has_register
@@ -150,6 +178,17 @@ def _priv_cell(entries: list[tuple[str, str]]) -> str:
     if not entries:
         return EMPTY
     return "<br>".join(f"`{_cell(priv)}` on `{_cell(path)}`" for priv, path in entries)
+
+
+def _confirm_note(tool: Tool) -> str:
+    """The confirm note the server appends at runtime for default-confirmed
+    categories (``DEFAULT_REQUIRE_CONFIRM``); empty for all other tools."""
+    if tool.category not in DEFAULT_REQUIRE_CONFIRM:
+        return ""
+    note = CONFIRM_NOTE
+    if tool.dry_run:
+        note += CONFIRM_DRY_RUN_NOTE
+    return note
 
 
 def generate(src_dir: Path) -> tuple[str, list[str]]:
@@ -195,18 +234,23 @@ def generate(src_dir: Path) -> tuple[str, list[str]]:
         "",
         f"**{len(tools)} tools** in {len(with_tools)} of {len(modules)} tool modules.",
         "",
-        "| Tool | Category | PVE privilege/path | PBS privilege/path | Shell | Description |",
-        "|---|---|---|---|---|---|",
+        "| Tool | Title | Category | PVE privilege/path | PBS privilege/path | Shell | Description |",
+        "|---|---|---|---|---|---|---|",
     ]
     for tool in tools:
+        description = _cell(tool.description) or "(no docstring)"
+        note = _confirm_note(tool)
+        if note:
+            description = f"{description} {note}"
         lines.append(
-            "| `{name}` | `{category}` | {pve} | {pbs} | {shell} | {description} |".format(
+            "| `{name}` | {title} | `{category}` | {pve} | {pbs} | {shell} | {description} |".format(
                 name=_cell(tool.name),
+                title=_cell(tool.title),
                 category=_cell(tool.category),
                 pve=_priv_cell(tool.pve),
                 pbs=_priv_cell(tool.pbs),
                 shell=f"`{_cell(tool.shell)}`" if tool.shell else EMPTY,
-                description=_cell(tool.description) or "(no docstring)",
+                description=description,
             )
         )
 
