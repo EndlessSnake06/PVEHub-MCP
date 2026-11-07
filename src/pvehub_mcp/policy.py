@@ -12,7 +12,7 @@ import hashlib
 import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 from urllib.parse import unquote
 
@@ -284,6 +284,7 @@ class Policy:
                 raise PolicyError(
                     f"vmid {vmid} in {normalized} is outside exec.allowed_vmids"
                 )
+            _check_vmid_params(params, self)
         if params and _contains_secret_param(params):
             raise PolicyError("generic API parameters must not contain password/secret/token keys")
 
@@ -312,6 +313,8 @@ class Policy:
     def check_file_path(self, path: str) -> None:
         if "\x00" in path:
             raise InvalidArgument("path contains a NUL byte")
+        if ".." in PurePosixPath(path).parts:
+            raise PolicyError(f"path {path!r} must not contain '..' segments", details={"path": path})
         roots = self.file.exec.files.allowed_roots
         if not roots:
             return
@@ -398,6 +401,8 @@ def normalize_api_path(path: str) -> str | None:
         candidate = decoded
     if "%" in candidate:
         return None
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in candidate):
+        return None
     candidate = re.sub(r"/{2,}", "/", candidate)
     parts: list[str] = []
     for part in candidate.split("/"):
@@ -429,10 +434,36 @@ def _vmid_from_path(path: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _check_vmid_params(params: dict[str, Any] | None, policy: Policy) -> None:
+    """Enforce ``exec.allowed_vmids`` for VMIDs carried as request parameters.
+
+    ``POST /nodes/{node}/qemu`` and ``/vzdump`` take the VMID in the body, not in
+    the path, so the path check alone would let a generic call create or back up
+    guests outside the allowed range.
+    """
+
+    if not params:
+        return
+    for key in ("vmid", "newid"):
+        if key not in params:
+            continue
+        value = params[key]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise InvalidArgument(f"generic API parameter {key!r} must be an integer")
+        if not policy.file.exec.vmid_allowed(value):
+            raise PolicyError(
+                f"{key} {value} in generic API parameters is outside exec.allowed_vmids"
+            )
+
+
 def _contains_secret_param(value: Any) -> bool:
     if isinstance(value, dict):
         for key, item in value.items():
-            if str(key).lower() in {"password", "passwd", "secret", "token"}:
+            lowered = str(key).lower()
+            if any(
+                marker in lowered
+                for marker in ("password", "passwd", "secret", "token", "api_key", "apikey")
+            ):
                 return True
             if _contains_secret_param(item):
                 return True
