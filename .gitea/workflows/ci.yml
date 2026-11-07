@@ -108,7 +108,7 @@ jobs:
         run: |
           docker compose up -d --build
           for attempt in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:8080/health; then
+            if docker compose exec -T pvehub-mcp python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).status == 200 else 1)"; then
               docker compose ps
               exit 0
             fi
