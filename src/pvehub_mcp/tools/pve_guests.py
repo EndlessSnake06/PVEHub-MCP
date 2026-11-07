@@ -6,6 +6,7 @@ from typing import Any
 
 from ..audit import redact_value
 from ..errors import InvalidArgument, PolicyError
+from ..validation import api_segment
 from .common import guest_summary, ok, snapshot_summary
 
 _POWER_ACTIONS = ("start", "stop", "shutdown", "reboot", "suspend", "resume")
@@ -232,6 +233,7 @@ def register(hub: Any) -> None:
 
         vmstate includes RAM state and is only supported for QEMU VMs.
         """
+        snapname = api_segment(snapname, "snapname")
         resolved, kind = await _target(hub, vmid, instance, node)
         if vmstate and kind != "qemu":
             raise InvalidArgument("vmstate snapshots are only supported for QEMU VMs")
@@ -273,6 +275,7 @@ def register(hub: Any) -> None:
         instance: str | None = None,
     ) -> str:
         """Delete a guest snapshot permanently (requires confirm=true)."""
+        snapname = api_segment(snapname, "snapname")
         if dry_run:
             return ok(
                 _dry_run(
@@ -323,6 +326,7 @@ def register(hub: Any) -> None:
         instance: str | None = None,
     ) -> str:
         """Roll a guest back to a snapshot, discarding newer state (requires confirm=true)."""
+        snapname = api_segment(snapname, "snapname")
         if dry_run:
             return ok(
                 _dry_run(
@@ -506,6 +510,7 @@ def register(hub: Any) -> None:
         ostemplate is a volume ID such as local:vztmpl/debian-12-standard_amd64.tar.zst;
         rootfs overrides the container root filesystem (default storage:<size>).
         """
+        node = api_segment(node, "node")
         client = hub.pve(instance)
         data: dict[str, Any] = {
             "vmid": vmid,
@@ -576,6 +581,7 @@ def register(hub: Any) -> None:
         memory is MiB; net0/scsi0 take PVE config strings such as
         'virtio,bridge=vmbr0' and 'storage:32'.
         """
+        node = api_segment(node, "node")
         client = hub.pve(instance)
         data: dict[str, Any] = {"vmid": vmid, "storage": storage, "start": start}
         optional = {

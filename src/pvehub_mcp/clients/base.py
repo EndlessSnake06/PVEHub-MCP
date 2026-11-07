@@ -56,7 +56,17 @@ def encode_params(params: dict[str, Any] | None) -> dict[str, Any]:
 def quote_path(path: str) -> str:
     if not path.startswith("/"):
         raise InvalidArgument("API path must start with '/'")
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in path):
+        raise InvalidArgument("API path must not contain control characters")
+    if "\\" in path:
+        raise InvalidArgument("API path must not contain backslashes")
+    # httpx removes literal dot segments before sending.  Rejecting them here keeps
+    # every API call inside the configured api_path, even if a tool forgets to
+    # validate one of its path arguments.
+    if any(part in {".", ".."} for part in path.split("/")):
+        raise InvalidArgument("API path must not contain '.' or '..' segments")
     return quote(path, safe="/!$&'()*+,;=:@-._~")
+
 
 
 class BaseProxmoxClient:

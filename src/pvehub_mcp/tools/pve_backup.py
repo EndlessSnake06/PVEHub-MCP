@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import InvalidArgument
+from ..validation import api_segment
 from .common import ok, pick
 
 _BACKUP_KEYS = (
@@ -66,6 +67,8 @@ def register(hub: Any) -> None:
             )
         if bwlimit is not None and bwlimit < 0:
             raise InvalidArgument("bwlimit must be zero or positive (KiB/s)")
+        node = api_segment(node, "node")
+        storage = api_segment(storage, "storage")
         client = hub.pve(instance)
         data: dict[str, Any] = {"vmid": vmid, "storage": storage, "mode": mode}
         if compress is not None:
@@ -100,6 +103,8 @@ def register(hub: Any) -> None:
         instance: str | None = None,
     ) -> str:
         """List backup volumes on a storage, optionally only for one VMID."""
+        node = api_segment(node, "node")
+        storage = api_segment(storage, "storage")
         client = hub.pve(instance)
         params: dict[str, Any] = {"content": "backup"}
         if vmid is not None:
@@ -147,6 +152,8 @@ def register(hub: Any) -> None:
         """
         if type not in _GUEST_TYPES:
             raise InvalidArgument("type must be 'qemu' or 'lxc'")
+        node = api_segment(node, "node")
+        storage = api_segment(storage, "storage")
         if dry_run:
             endpoint = f"/nodes/{node}/{type}"
             return ok(

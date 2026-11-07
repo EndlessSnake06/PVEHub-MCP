@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import InvalidArgument
+from ..validation import api_segment, task_upid
 from .common import ok, task_summary
 
 
@@ -56,7 +57,7 @@ def register(hub: Any) -> None:
             base["until"] = until
         nodes: list[str]
         if node is not None:
-            nodes = [node]
+            nodes = [api_segment(node, "node")]
         else:
             node_data = await client.get("/nodes")
             nodes = [item["node"] for item in _as_items(node_data) if item.get("node")]
@@ -79,6 +80,8 @@ def register(hub: Any) -> None:
     )
     async def pve_task_status(node: str, upid: str, instance: str | None = None) -> str:
         """Show a task's status and exit status by UPID."""
+        node = api_segment(node, "node")
+        upid = task_upid(upid)
         client = hub.pve(instance)
         data = await client.get(f"/nodes/{node}/tasks/{upid}/status")
         status = task_summary(data)
@@ -100,6 +103,8 @@ def register(hub: Any) -> None:
         instance: str | None = None,
     ) -> str:
         """Read a task log tail (start line offset, limit up to 1000 lines)."""
+        node = api_segment(node, "node")
+        upid = task_upid(upid)
         if start < 0:
             raise InvalidArgument("start must be zero or positive")
         if limit < 1 or limit > 1000:
@@ -123,6 +128,8 @@ def register(hub: Any) -> None:
         instance: str | None = None,
     ) -> str:
         """Stop a running task (requires confirm=true)."""
+        node = api_segment(node, "node")
+        upid = task_upid(upid)
         if dry_run:
             return ok(
                 {

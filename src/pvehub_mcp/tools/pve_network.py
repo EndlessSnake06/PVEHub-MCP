@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import InvalidArgument
+from ..validation import api_segment
 from .common import ok, pick
 
 _NETWORK_KEYS = (
@@ -86,6 +87,7 @@ def register(hub: Any) -> None:
             raise InvalidArgument(
                 f"unknown interface type {type!r}; expected one of {sorted(_INTERFACE_TYPES)}"
             )
+        node = api_segment(node, "node")
         client = hub.pve(instance)
         params = {"type": type} if type else None
         data = await client.get(f"/nodes/{node}/network", params=params)
@@ -105,6 +107,8 @@ def register(hub: Any) -> None:
         instance: str | None = None,
     ) -> str:
         """Show one network interface's configuration and state on a node."""
+        node = api_segment(node, "node")
+        iface = api_segment(iface, "iface")
         client = hub.pve(instance)
         data = await client.get(f"/nodes/{node}/network/{iface}")
         payload = {"node": node, "interface": pick(data, _NETWORK_KEYS)}
