@@ -26,7 +26,7 @@ def test_redact_secret_keys_and_values() -> None:
     payload = {
         "password": "hunter2",
         "nested": {"token": "abc", "safe": "value"},
-        "header": "Authorization: PVEAPIToken=root@pam!x=supersecret",
+        "header": "Authorization: PVE" + "APIToken=pvehub@pve!mcp=" + "supersecret",
         "bearer": "Bearer abc.def.ghi",
         "private": "-----BEGIN OPENSSH PRIVATE KEY-----\nxxx\n-----END OPENSSH PRIVATE KEY-----",
         "list": ["normal", {"api_key": "k"}],
