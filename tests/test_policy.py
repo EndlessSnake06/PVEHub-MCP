@@ -67,6 +67,8 @@ def test_generic_hard_denied_paths() -> None:
         "/nodes/pve1/vncshell",
         "/nodes/pve1/spiceshell",
         "/nodes/pve1/termproxy",
+        "/nodes/pve1/qemu/100/agent/exec",
+        "/nodes/pve1/qemu/100/agent/file-write",
     ):
         with pytest.raises(PolicyError):
             policy.check_generic("POST", path)

@@ -41,6 +41,8 @@ HARD_DENY_PATHS: tuple[str, ...] = (
     "/nodes/*/spiceshell",
     "/nodes/*/termproxy",
     "/nodes/*/qemu/*/monitor",
+    "/nodes/*/qemu/*/agent/exec",
+    "/nodes/*/qemu/*/agent/file-write",
 )
 
 _DEFAULT_DENY_PATHS = [
@@ -51,6 +53,8 @@ _DEFAULT_DENY_PATHS = [
     "/nodes/*/spiceshell",
     "/nodes/*/termproxy",
     "/nodes/*/qemu/*/monitor",
+    "/nodes/*/qemu/*/agent/exec",
+    "/nodes/*/qemu/*/agent/file-write",
 ]
 
 
