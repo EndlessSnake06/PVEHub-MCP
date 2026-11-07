@@ -20,6 +20,7 @@ _SECRET_VALUE_PATTERNS = [
     re.compile(r"(?i)Bearer\s+[A-Za-z0-9._~+/\-]+=*"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S),
     re.compile(r"(?i)([?&](?:password|secret|token)=)[^&\s]+"),
+    re.compile(r"(?i)(--?(?:password|passwd|token|secret|api[-_]?key)[= ])\S+"),
 ]
 
 
