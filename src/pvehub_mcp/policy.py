@@ -284,18 +284,20 @@ class Policy:
                 raise PolicyError(
                     f"vmid {vmid} in {normalized} is outside exec.allowed_vmids"
                 )
+            if params and str(params.get("all", "")).lower() in {"1", "true", "yes"}:
+                raise PolicyError(
+                    "generic API mass operation (all=1) is blocked by policy",
+                    details={"path": normalized},
+                )
             for key in ("vmid", "newid"):
                 if not params or key not in params:
                     continue
-                try:
-                    requested = int(params[key])
-                except (TypeError, ValueError) as exc:
-                    raise InvalidArgument(f"generic API parameter {key} must be an integer") from exc
-                if not self.file.exec.vmid_allowed(requested):
-                    raise PolicyError(
-                        f"{key} {requested} is outside exec.allowed_vmids",
-                        details={key: requested},
-                    )
+                for requested in _coerce_vmids(params[key], key):
+                    if not self.file.exec.vmid_allowed(requested):
+                        raise PolicyError(
+                            f"{key} {requested} is outside exec.allowed_vmids",
+                            details={key: requested},
+                        )
         if params and _contains_secret_param(params):
             raise PolicyError("generic API parameters must not contain password/secret/token keys")
 
@@ -439,6 +441,22 @@ _VM_PATH_RE = re.compile(r"^/(?:nodes/[^/]+/(?:qemu|lxc)|vms)/([0-9]+)(?:/|$)")
 def _vmid_from_path(path: str) -> int | None:
     match = _VM_PATH_RE.match(path)
     return int(match.group(1)) if match else None
+
+
+def _coerce_vmids(value: Any, field: str) -> list[int]:
+    if isinstance(value, (list, tuple)):
+        raw_values = list(value)
+    elif isinstance(value, str) and "," in value:
+        raw_values = [part.strip() for part in value.split(",") if part.strip()]
+    else:
+        raw_values = [value]
+    result: list[int] = []
+    for item in raw_values:
+        try:
+            result.append(int(item))
+        except (TypeError, ValueError) as exc:
+            raise InvalidArgument(f"generic API parameter {field} must contain integers") from exc
+    return result
 
 
 def _contains_secret_param(value: Any) -> bool:

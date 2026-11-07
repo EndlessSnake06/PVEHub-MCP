@@ -109,6 +109,11 @@ def test_generic_vmid_parameter_gate() -> None:
         )
     with pytest.raises(InvalidArgument):
         policy.check_generic("POST", "/nodes/pve1/qemu", {"vmid": "abc"})
+    policy.check_generic("POST", "/nodes/pve1/vzdump", {"vmid": [105, 106]})
+    with pytest.raises(PolicyError):
+        policy.check_generic("POST", "/nodes/pve1/vzdump", {"vmid": [105, 500]})
+    with pytest.raises(PolicyError):
+        policy.check_generic("POST", "/nodes/pve1/vzdump", {"all": 1})
 
 
 def test_command_denylist() -> None:
