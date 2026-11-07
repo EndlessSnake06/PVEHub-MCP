@@ -1,0 +1,49 @@
+# PVEHub-MCP — single-container deployment.
+#
+#   cp .env.example .env            # edit tokens and URLs
+#   mkdir -p config ssh
+#   cp config/examples/operator.yaml config/policy.yaml
+#   docker compose up -d --build
+#
+# The published port belongs on the LAN/VPN only. Terminate TLS in a reverse
+# proxy (Caddy, Traefik, nginx) in front of it and never expose 8080 to the
+# internet. Prefer "127.0.0.1:8080:8080" when the proxy runs on the same host.
+services:
+  pvehub-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pvehub-mcp:0.1.0
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      # Configuration and policy are read-only; SSH material is read-only too.
+      - ./config:/config:ro
+      - ./ssh:/ssh:ro
+      # Audit log, UPID/schema caches, capability state.
+      - pvehub-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import sys,urllib.request;
+          sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).status == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  pvehub-data:
