@@ -15,12 +15,14 @@ logger = logging.getLogger(__name__)
 _SECRET_KEY_RE = re.compile(
     r"(?i)(pass(word|wd)?|secret|token|api[-_]?key|private[-_]?key|authorization|cookie|csrf)"
 )
+_BODY_KEY_RE = re.compile(r"(?i)^(command|content|content_base64|input|input_data)$")
 _SECRET_VALUE_PATTERNS = [
     re.compile(r"(?i)(PVEAPIToken|PBSAPIToken)=[^\s\"']+"),
     re.compile(r"(?i)Bearer\s+[A-Za-z0-9._~+/\-]+=*"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S),
     re.compile(r"(?i)([?&](?:password|secret|token)=)[^&\s]+"),
     re.compile(r"(?i)(--?(?:password|passwd|token|secret|api[-_]?key)[= ])\S+"),
+    re.compile(r"(?i)\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY)\s*=\s*[^\s;]+"),
 ]
 
 
@@ -28,10 +30,31 @@ def redact_value(value: Any, *, max_string: int = 2048) -> Any:
     if isinstance(value, dict):
         result: dict[str, Any] = {}
         for key, item in value.items():
-            if _SECRET_KEY_RE.search(str(key)):
-                result[str(key)] = "***"
+            key_text = str(key)
+            if _SECRET_KEY_RE.search(key_text):
+                result[key_text] = "***"
+            elif _BODY_KEY_RE.match(key_text) and isinstance(item, str):
+                # Commands and file bodies can contain secrets in ways no regex catches.
+                # Keep a bounded, redacted preview for commands; hash everything.
+                import hashlib
+
+                if key_text.lower() == "command":
+                    redacted_preview = item[:160]
+                    for pattern in _SECRET_VALUE_PATTERNS:
+                        redacted_preview = (
+                            pattern.sub(r"\1***", redacted_preview)
+                            if pattern.groups
+                            else pattern.sub("***", redacted_preview)
+                        )
+                else:
+                    redacted_preview = "<redacted>"
+                result[key_text] = {
+                    "sha256": hashlib.sha256(item.encode("utf-8")).hexdigest(),
+                    "length": len(item),
+                    "preview": redacted_preview,
+                }
             else:
-                result[str(key)] = redact_value(item, max_string=max_string)
+                result[key_text] = redact_value(item, max_string=max_string)
         return result
     if isinstance(value, (list, tuple, set)):
         return [redact_value(item, max_string=max_string) for item in value]
