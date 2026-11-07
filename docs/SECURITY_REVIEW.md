@@ -97,3 +97,8 @@ $ uv run pytest -o addopts="" -q
 
 New regression coverage lives in `tests/test_security_review.py` (29 tests) plus updated
 SFTP expectations in `tests/test_tools_exec_files.py`.
+
+Post-merge integration gate after the follow-up hardening (generic-API confirm, hard-denied
+guest-agent exec/file-write, dry-run signature check, encoded-dot-segment rejection):
+`250 passed, 2 skipped`, `ruff` clean, `mypy` clean (39 source files). The review baseline
+and the evidence above refer to `fix/security-review`; the merged tree is `integration/v0.1.0`.

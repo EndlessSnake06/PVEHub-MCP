@@ -78,15 +78,19 @@ and every tool/category can be blocked through configuration.
 
 ## Phase 7 — Hardening and review
 
-- [ ] Independent review subagent: secrets in logs, policy bypasses, command injection,
+- [x] Independent review subagent: secrets in logs, policy bypasses, command injection,
   output-size DoS, TLS defaults.
-- [ ] Fixes + regression tests; `docs/SECURITY_REVIEW.md`.
-- [ ] Live integration run (read-only) only if credentials become available; otherwise documented as not run.
+- [x] Fixes + regression tests; `docs/SECURITY_REVIEW.md` (15 findings: 10 fixed, 5 accepted/justified).
+- [!] Live integration run (read-only) not run: no PVE/PBS API tokens or SSH keys were supplied.
+- [x] Post-review hardening: generic-API writes require `confirm=true`; guest-agent
+  exec/file-write hard-denied in the generic bridge; `dry_run` only honored when implemented;
+  API paths reject encoded dot segments; command/file bodies hashed in the audit log.
 
 ## Phase 8 — Release
 
-- [ ] Version `0.1.0`, `CHANGELOG.md`, git tag, image build/push (if registry available).
-- [ ] `docs/STATUS.md` with honest tested/mocked/untested matrix.
+- [x] Version `0.1.0`, `CHANGELOG.md`, git tag, local wheel build; image build/push not possible
+  without a Docker daemon/registry.
+- [x] `docs/STATUS.md` with honest tested/mocked/untested matrix.
 
 ## Working agreement
 

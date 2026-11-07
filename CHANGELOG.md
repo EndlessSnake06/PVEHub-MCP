@@ -34,4 +34,7 @@ versioning: Semantic Versioning.
 - SSH host-key verification, dedicated key, output/time limits and `shlex.quote`-based LXC
   command construction.
 - No secrets in the repository; `.env.example` only. Audit redaction for token/password/
-  private-key patterns.
+  private-key patterns, command/file bodies hashed instead of logged in clear.
+- Independent security review (`docs/SECURITY_REVIEW.md`): fixed API-path traversal in curated
+  tools, VMID bypass in generic API parameters, audit leaks, DNS-rebinding on loopback,
+  resource-policy bypass and SFTP symlink escape; 5 low/info findings accepted and documented.
