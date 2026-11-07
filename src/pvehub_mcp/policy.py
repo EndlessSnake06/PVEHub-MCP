@@ -284,10 +284,8 @@ class Policy:
                 raise PolicyError(
                     f"vmid {vmid} in {normalized} is outside exec.allowed_vmids"
                 )
-        if params:
-            for key in params:
-                if key.lower() in {"password", "secret", "token"}:
-                    raise PolicyError(f"generic API parameter {key!r} is not allowed")
+        if params and _contains_secret_param(params):
+            raise PolicyError("generic API parameters must not contain password/secret/token keys")
 
     def check_command(self, command: str) -> None:
         if "\x00" in command:
@@ -429,3 +427,15 @@ _VM_PATH_RE = re.compile(r"^/(?:nodes/[^/]+/(?:qemu|lxc)|vms)/([0-9]+)(?:/|$)")
 def _vmid_from_path(path: str) -> int | None:
     match = _VM_PATH_RE.match(path)
     return int(match.group(1)) if match else None
+
+
+def _contains_secret_param(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key).lower() in {"password", "passwd", "secret", "token"}:
+                return True
+            if _contains_secret_param(item):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_contains_secret_param(item) for item in value)
+    return False
