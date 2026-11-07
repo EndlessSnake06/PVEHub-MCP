@@ -16,7 +16,7 @@ help:
 	@echo "run-stdio    run stdio transport"
 	@echo "docker-build build the container image"
 	@echo "docker-up    docker compose up -d --build"
-	@echo "docs-tools   regenerate docs/TOOLS.md from the live registry"
+	@echo "docs-tools   regenerate docs/TOOLS.md from @hub.tool declarations (static scan)"
 
 install:
 	$(UV) sync --extra dev
