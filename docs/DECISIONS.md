@@ -164,3 +164,21 @@ credentials are present. `docs/STATUS.md` states exactly what was mocked.
 
 **Decision:** Policy is read at startup. Changes require a restart. `pvehub_capabilities`
 reports the policy file path and a hash so operators can verify what is active.
+
+## D018 — MCP endpoint: authentication is default-deny (issue #16)
+
+**Context:** The server carries full PVE/PBS control rights plus SSH access to the PVE
+hosts. In 0.1.0 the bearer token was optional: a loopback bind started without any
+caller authentication, so every local process or container in the LXC (e.g. a
+compromised service with `network_mode: host`) could drive the full control plane,
+including destructive tools. Fail-open at the endpoint that holds the highest rights in
+the homelab.
+
+**Decision:** The http transport requires `PVEHUB_MCP_AUTH_TOKEN` and refuses to start
+without it, for any bind address. `PVEHUB_MCP_AUTH_REQUIRED=false` is an explicit,
+logged opt-out for loopback development setups only; a non-loopback bind without a token
+is rejected even with the opt-out (the pre-existing hard rule stays). `stdio` is
+unaffected (no listener). `/health` remains unauthenticated (liveness for orchestrators;
+it exposes no control data). Per-client attribution (named tokens, `client` field in the
+audit log) and OAuth2 client-credentials against Pocket ID are out of scope for this
+fix and tracked as follow-up work in issue #16.

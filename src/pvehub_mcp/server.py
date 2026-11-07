@@ -572,6 +572,11 @@ def build_http_app(hub: PVEHub) -> Starlette:
             token=hub.settings.mcp_auth_token.get_secret_value(),
             protected_prefix="/mcp",
         )
+    else:
+        logger.warning(
+            "MCP endpoint /mcp is UNAUTHENTICATED (mcp_auth_required=false); "
+            "loopback development setups only - do not expose this port"
+        )
     return app
 
 

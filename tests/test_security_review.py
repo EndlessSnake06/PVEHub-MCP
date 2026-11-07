@@ -283,7 +283,9 @@ def test_resources_respect_denied_read_category() -> None:
 
 
 def test_loopback_bind_enables_dns_rebinding_protection() -> None:
-    security = _transport_security(_settings(transport="http", host="127.0.0.1"))
+    security = _transport_security(
+        _settings(transport="http", host="127.0.0.1", mcp_auth_required=False)
+    )
 
     assert security.enable_dns_rebinding_protection is True
     assert "127.0.0.1:*" in security.allowed_hosts
@@ -324,7 +326,9 @@ async def test_http_rejects_foreign_host_header_on_loopback(tmp_path: Path) -> N
     respx.get("https://pve.test:8006/api2/json/access/permissions").mock(
         return_value=Response(200, json={"data": {}})
     )
-    settings = _settings(transport="http", host="127.0.0.1", state_dir=str(tmp_path))
+    settings = _settings(
+        transport="http", host="127.0.0.1", state_dir=str(tmp_path), mcp_auth_required=False
+    )
     hub = PVEHub(settings, Policy(file=PolicyFile()))
     hub.build()
     app = build_http_app(hub)
@@ -392,6 +396,8 @@ def test_env_example_requires_explicit_bearer_token() -> None:
     lines = (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
     token_lines = [line for line in lines if line.startswith("PVEHUB_MCP_AUTH_TOKEN=")]
     assert token_lines == ["PVEHUB_MCP_AUTH_TOKEN="]
+    required_lines = [line for line in lines if line.startswith("PVEHUB_MCP_AUTH_REQUIRED=")]
+    assert required_lines == ["PVEHUB_MCP_AUTH_REQUIRED=true"]
 
 
 def test_file_path_policy_rejects_dot_segments() -> None:

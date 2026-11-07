@@ -198,6 +198,7 @@ class Settings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8080
     mcp_auth_token: SecretStr | None = None
+    mcp_auth_required: bool = True
     allowed_hosts: list[str] = Field(default_factory=list)
 
     pve: list[PVEInstance] = Field(default_factory=list)
@@ -240,6 +241,11 @@ class Settings(BaseModel):
                 raise ValueError("mcp_auth_token must not be empty")
             if len(token) < 16:
                 raise ValueError("mcp_auth_token must be at least 16 characters")
+        if self.transport == "http" and self.mcp_auth_required and self.mcp_auth_token is None:
+            raise ValueError(
+                "mcp_auth_token is required for the http transport; set PVEHUB_MCP_AUTH_TOKEN "
+                "or PVEHUB_MCP_AUTH_REQUIRED=false (loopback development setups only)"
+            )
         if (
             self.transport == "http"
             and not _is_loopback(self.host)
@@ -312,6 +318,7 @@ def _apply_env(data: dict[str, Any]) -> dict[str, Any]:
         "PVEHUB_HOST": ("host", str),
         "PVEHUB_PORT": ("port", int),
         "PVEHUB_MCP_AUTH_TOKEN": ("mcp_auth_token", str),
+        "PVEHUB_MCP_AUTH_REQUIRED": ("mcp_auth_required", _as_bool),
         "PVEHUB_ALLOWED_HOSTS": ("allowed_hosts", _as_list),
         "PVEHUB_POLICY_FILE": ("policy_file", str),
         "PVEHUB_AUDIT_LOG": ("audit_log", str),

@@ -60,10 +60,11 @@ PVEHUB_PBS_TOKEN_SECRET=<token secret>
 PVEHUB_POLICY_FILE=/config/policy.yaml
 ```
 
-Startup refuses a non-loopback `PVEHUB_HOST` without `PVEHUB_MCP_AUTH_TOKEN`, rejects
-tokens shorter than 16 characters, refuses
-`http://` instance URLs unless `PVEHUB_ALLOW_INSECURE_HTTP=true`, and requires at
-least one PVE or PBS instance.
+Startup refuses **any** http bind without `PVEHUB_MCP_AUTH_TOKEN` (the
+`PVEHUB_MCP_AUTH_REQUIRED=false` opt-out only covers loopback development
+setups), rejects tokens shorter than 16 characters, refuses `http://` instance
+URLs unless `PVEHUB_ALLOW_INSECURE_HTTP=true`, and requires at least one PVE or
+PBS instance.
 
 ## Environment variables
 
@@ -75,7 +76,8 @@ least one PVE or PBS instance.
 | `PVEHUB_TRANSPORT` | `http` | `http` (Streamable HTTP at `/mcp`) or `stdio` | no |
 | `PVEHUB_HOST` | `127.0.0.1` | Bind address for HTTP | no |
 | `PVEHUB_PORT` | `8080` | Bind port for HTTP | no |
-| `PVEHUB_MCP_AUTH_TOKEN` | unset | Bearer token checked on every `/mcp` request; mandatory for non-loopback binds | **yes** |
+| `PVEHUB_MCP_AUTH_TOKEN` | unset | Bearer token checked on every `/mcp` request; **required for the http transport** (see `PVEHUB_MCP_AUTH_REQUIRED`) | **yes** |
+| `PVEHUB_MCP_AUTH_REQUIRED` | `true` | When `true` (default), the http transport refuses to start without `PVEHUB_MCP_AUTH_TOKEN`. `false` allows an unauthenticated `/mcp` on loopback binds only (development); non-loopback binds stay refused | no |
 | `PVEHUB_ALLOWED_HOSTS` | empty | Comma-separated `Host`/`Origin` allowlist; enables DNS-rebinding protection. Empty disables that protection | no |
 | `PVEHUB_POLICY_FILE` | `/config/policy.yaml` | Path to the policy YAML | no |
 | `PVEHUB_AUDIT_LOG` | `/data/audit.jsonl` | JSONL audit path. Disable with YAML `audit_log: null`; an empty env value is ignored | no |
@@ -164,6 +166,7 @@ transport: http            # http | stdio
 host: 0.0.0.0
 port: 8080
 mcp_auth_token: ${PVEHUB_MCP_AUTH_TOKEN}
+mcp_auth_required: true        # false: unauthenticated /mcp, loopback dev setups only
 allowed_hosts: ["pvehub.example.com", "192.168.1.20:8080"]
 
 pve:
@@ -223,9 +226,10 @@ allow_insecure_http: false
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `transport` | `http` \| `stdio` | `http` | `http` serves `/mcp` and `/health` |
-| `host` | string | `127.0.0.1` | non-loopback requires `mcp_auth_token` |
+| `host` | string | `127.0.0.1` | see `mcp_auth_required`/`mcp_auth_token` |
 | `port` | int | `8080` | |
 | `mcp_auth_token` | string (secret) | unset | constant-time bearer check on `/mcp` |
+| `mcp_auth_required` | bool | `true` | http transport refuses to start without `mcp_auth_token`; `false` = unauthenticated loopback development only, non-loopback stays refused |
 | `allowed_hosts` | list[str] | `[]` | enables DNS-rebinding protection; must contain the hostnames clients use |
 | `pve` | list[instance] | `[]` | at least one PVE or PBS instance required |
 | `pbs` | list[instance] | `[]` | |

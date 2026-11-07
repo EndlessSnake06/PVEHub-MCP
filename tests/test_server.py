@@ -205,3 +205,34 @@ async def test_http_health_and_bearer_auth() -> None:
 def test_non_loopback_requires_token_at_settings_level() -> None:
     with pytest.raises(ValidationError):
         _settings(transport="http", host="0.0.0.0", mcp_auth_token=None)
+
+
+def test_loopback_without_token_is_rejected_at_settings_level() -> None:
+    with pytest.raises(ValidationError):
+        _settings(transport="http", host="127.0.0.1", mcp_auth_token=None)
+
+
+@respx.mock
+async def test_http_loopback_opt_out_serves_unauthenticated() -> None:
+    respx.get("https://pve.test:8006/api2/json/access/permissions").mock(
+        return_value=httpx.Response(200, json={"data": PERMISSIONS})
+    )
+    settings = _settings(
+        transport="http",
+        host="127.0.0.1",
+        mcp_auth_token=None,
+        mcp_auth_required=False,
+    )
+    hub = PVEHub(settings, Policy(file=PolicyFile()))
+    hub.build()
+    app = build_http_app(hub)
+    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+    ):
+        health = await client.get("/health")
+        assert health.status_code == 200
+
+        open_request = await client.post("/mcp", json={})
+        assert open_request.status_code != 401

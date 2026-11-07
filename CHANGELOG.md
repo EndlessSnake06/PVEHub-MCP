@@ -5,6 +5,14 @@ versioning: Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The http transport now refuses to start without `PVEHUB_MCP_AUTH_TOKEN` for **any**
+  bind address. 0.1.0 only refused non-loopback binds; loopback binds started with an
+  unauthenticated `/mcp` (issue #16). `PVEHUB_MCP_AUTH_REQUIRED=false` (new, default
+  `true`) is the explicit opt-out for loopback development setups; a warning is logged
+  at startup and non-loopback binds without a token stay refused.
+
 ## [0.1.0] — 2026-11-07
 
 ### Added
