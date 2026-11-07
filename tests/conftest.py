@@ -295,6 +295,11 @@ class ExecEnv:
 def build_settings(tmp_path: Path, policy_text: str = POLICY) -> Settings:
     policy_file = tmp_path / "policy.yaml"
     policy_file.write_text(policy_text, encoding="utf-8")
+    key_file = tmp_path / "id_ed25519"
+    key_file.write_text("dummy-key-for-registration-tests", encoding="utf-8")
+    key_file.chmod(0o600)
+    known_hosts = tmp_path / "known_hosts"
+    known_hosts.write_text("", encoding="utf-8")
     return Settings.model_validate(
         {
             "pve": [
@@ -317,15 +322,15 @@ def build_settings(tmp_path: Path, policy_text: str = POLICY) -> Settings:
                 "nodes": {
                     "pve1": {
                         "host": "10.0.0.11",
-                        "key_path": "/keys/id_ed25519",
-                        "known_hosts": "/keys/known_hosts",
+                        "key_path": str(key_file),
+                        "known_hosts": str(known_hosts),
                         "strict_host_key": False,
                     }
                 },
                 "pbs": {
                     "host": "10.0.0.12",
-                    "key_path": "/keys/id_ed25519",
-                    "known_hosts": "/keys/known_hosts",
+                    "key_path": str(key_file),
+                    "known_hosts": str(known_hosts),
                     "strict_host_key": False,
                 },
             },

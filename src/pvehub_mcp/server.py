@@ -294,6 +294,10 @@ class PVEHub:
 
     def _shell_available(self, shell: str) -> tuple[bool, str]:
         ssh_ready = bool(self.settings.ssh.nodes or self.settings.ssh.pbs)
+        if ssh_ready and shell in {"host", "lxc", "pbs", "files"}:
+            missing = self.settings.ssh.missing_prerequisites()
+            if missing:
+                return False, "SSH prerequisites missing: " + "; ".join(missing)
         if shell == "host":
             if not self.policy.file.exec.host:
                 return False, "exec.host is disabled"

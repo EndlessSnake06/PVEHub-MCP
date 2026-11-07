@@ -175,12 +175,20 @@ class SSHSettings(BaseModel):
     def missing_prerequisites(self) -> list[str]:
         missing: list[str] = []
         if not self.nodes and self.pbs is None:
-            missing.append("ssh.nodes or ssh.pbs")
-        if not Path(self.key_path).exists():
-            missing.append(f"ssh key not found: {self.key_path}")
-        if self.strict_host_key and not Path(self.known_hosts).exists():
-            missing.append(f"known_hosts not found: {self.known_hosts}")
-        return missing
+            return ["ssh.nodes or ssh.pbs"]
+        targets: list[SSHTarget] = []
+        for name in self.nodes:
+            resolved = self.node(name)
+            if resolved is not None:
+                targets.append(resolved)
+        if self.pbs is not None:
+            targets.append(self.pbs)
+        for target in targets:
+            if not Path(target.key_path).exists():
+                missing.append(f"ssh key not found: {target.key_path}")
+            if target.strict_host_key and not Path(target.known_hosts).exists():
+                missing.append(f"known_hosts not found: {target.known_hosts}")
+        return sorted(set(missing))
 
 
 class Settings(BaseModel):
