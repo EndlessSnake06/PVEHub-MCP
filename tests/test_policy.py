@@ -84,6 +84,14 @@ def test_generic_path_traversal_and_encoding() -> None:
             policy.check_generic("POST", path)
 
 
+def test_generic_secret_parameters_rejected() -> None:
+    policy = _policy()
+    with pytest.raises(PolicyError):
+        policy.check_generic("POST", "/access/users", {"password": "x"})
+    with pytest.raises(PolicyError):
+        policy.check_generic("POST", "/nodes", {"nested": {"token": "x"}})
+
+
 def test_generic_vmid_gate() -> None:
     policy = _policy(exec={"allowed_vmids": ["100-110"]})
     with pytest.raises(PolicyError):
