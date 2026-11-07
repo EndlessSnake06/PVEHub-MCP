@@ -313,3 +313,94 @@ async def test_missing_privilege_hides_tool(pve_audit_only: Any) -> None:
     assert "pve_guest_power" not in names
     blocked = {item.name: item.reason for item in hub.blocked}
     assert "VM.PowerMgmt" in blocked["pve_guest_power"]
+
+
+async def test_guest_create_vm_posts_minimal_config(pve: Any, call: Any) -> None:
+    hub, router = pve
+    route = router.post("/api2/json/nodes/pve1/qemu").mock(
+        return_value=Response(200, json={"data": "UPID:pve1:00000016:00000017:65000000:qmcreate:103:root@pam:"})
+    )
+
+    payload = await call(
+        hub,
+        "pve_guest_create_vm",
+        node="pve1",
+        vmid=103,
+        storage="local-lvm",
+        name="build",
+        cores=2,
+        net0="virtio,bridge=vmbr0",
+        wait=False,
+    )
+
+    assert payload["ok"] is True
+    data = form(route.calls[0].request)
+    assert data["vmid"] == "103"
+    assert data["storage"] == "local-lvm"
+    assert data["cores"] == "2"
+    assert data["net0"] == "virtio,bridge=vmbr0"
+    assert data["start"] == "0"
+
+
+async def test_guest_migrate_posts_target(pve: Any, call: Any) -> None:
+    hub, router = pve
+    mock_guests(router)
+    route = router.post("/api2/json/nodes/pve1/qemu/100/migrate").mock(
+        return_value=Response(200, json={"data": "UPID:pve1:00000018:00000019:65000000:qmigrate:100:root@pam:"})
+    )
+
+    payload = await call(hub, "pve_guest_migrate", vmid=100, target="pve2", wait=False)
+
+    assert payload["ok"] is True
+    data = form(route.calls[0].request)
+    assert data["target"] == "pve2"
+    assert data["online"] == "1"
+
+
+async def test_guest_migrate_rejects_same_node(pve: Any, call: Any) -> None:
+    hub, router = pve
+    mock_guests(router)
+
+    payload = await call(hub, "pve_guest_migrate", vmid=100, target="pve1")
+
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "invalid_argument"
+
+
+async def test_snapshot_delete_confirmed_sends_force(pve: Any, call: Any) -> None:
+    hub, router = pve
+    mock_guests(router)
+    route = router.delete("/api2/json/nodes/pve1/qemu/100/snapshot/pre-upgrade").mock(
+        return_value=Response(200, json={"data": SNAPSHOT_UPID})
+    )
+
+    payload = await call(
+        hub,
+        "pve_guest_snapshot_delete",
+        vmid=100,
+        snapname="pre-upgrade",
+        confirm=True,
+        force=True,
+        wait=False,
+    )
+
+    assert payload["ok"] is True
+    assert payload["data"]["deleted"] is True
+    assert route.calls[0].request.url.params["force"] == "1"
+
+
+async def test_snapshot_rollback_dry_run_makes_no_write(pve: Any, call: Any) -> None:
+    hub, router = pve
+    mock_guests(router)
+    rollback = router.post("/api2/json/nodes/pve1/qemu/100/snapshot/pre-upgrade/rollback").mock(
+        return_value=Response(200, json={"data": SNAPSHOT_UPID})
+    )
+
+    payload = await call(
+        hub, "pve_guest_snapshot_rollback", vmid=100, snapname="pre-upgrade", dry_run=True
+    )
+
+    assert payload["ok"] is True
+    assert payload["data"]["dry_run"] is True
+    assert not rollback.called
+    assert not [item for item in router.calls if item.request.method == "POST"]
