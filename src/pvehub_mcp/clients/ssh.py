@@ -50,8 +50,8 @@ class ExecResult:
 class SSHClientPool:
     def __init__(self, settings: SSHSettings) -> None:
         self.settings = settings
-        self._connections: dict[tuple[str, int, str], asyncssh.SSHClientConnection] = {}
-        self._locks: dict[tuple[str, int, str], asyncio.Lock] = {}
+        self._connections: dict[tuple[str, int, str, str, str, bool], asyncssh.SSHClientConnection] = {}
+        self._locks: dict[tuple[str, int, str, str, str, bool], asyncio.Lock] = {}
 
     # -- target resolution -------------------------------------------------
     def node_target(self, node: str) -> SSHTarget:
@@ -68,8 +68,26 @@ class SSHClientPool:
         return self.settings.pbs
 
     # -- connection --------------------------------------------------------
+    @staticmethod
+    def _cache_key(target: SSHTarget) -> tuple[str, int, str, str, str, bool]:
+        """Identity of a connection.
+
+        The host-key policy is part of the key: two node entries may point at the
+        same address, and a permissive entry must never satisfy a strict one
+        through connection reuse.
+        """
+
+        return (
+            target.host,
+            target.port,
+            target.user,
+            target.key_path,
+            target.known_hosts,
+            target.strict_host_key,
+        )
+
     async def _connect(self, target: SSHTarget) -> asyncssh.SSHClientConnection:
-        key = (target.host, target.port, target.user)
+        key = self._cache_key(target)
         lock = self._locks.setdefault(key, asyncio.Lock())
         async with lock:
             existing = self._connections.get(key)
@@ -180,7 +198,7 @@ class SSHClientPool:
         sudo: bool = False,
     ) -> ExecResult:
         target = self.node_target(node)
-        prefix = "sudo -n " if sudo else ""
+        prefix = "sudo -n " if (sudo or target.sudo) else ""
         wrapped = f"{prefix}pct exec {int(vmid)} -- sh -c {shlex.quote(command)}"
         return await self.run(
             target, wrapped, timeout=timeout, max_output_bytes=max_output_bytes
@@ -213,6 +231,33 @@ class SSHClientPool:
         )
 
     # -- SFTP --------------------------------------------------------------
+    async def realpath(
+        self, target: SSHTarget, remote_path: str, *, for_write: bool = False
+    ) -> str:
+        """Resolve a remote path through the SFTP server.
+
+        Used to re-check ``exec.files.allowed_roots`` after symlink resolution: a
+        symlink inside an allowed root could otherwise point outside of it.  For
+        writes the parent directory is resolved because the target file may not
+        exist yet.
+        """
+
+        conn = await self._connect(target)
+        try:
+            async with conn.start_sftp_client() as sftp:
+                if for_write:
+                    parent, _, name = remote_path.rpartition("/")
+                    raw_parent: Any = await sftp.realpath(parent or "/")
+                    resolved_parent = (
+                        raw_parent.decode("utf-8") if isinstance(raw_parent, bytes) else str(raw_parent)
+                    )
+                    base = resolved_parent.rstrip("/")
+                    return f"{base}/{name}" if base else f"/{name}"
+                resolved: Any = await sftp.realpath(remote_path)
+                return resolved.decode("utf-8") if isinstance(resolved, bytes) else str(resolved)
+        except (asyncssh.Error, OSError) as exc:
+            raise SSHUnavailable(f"cannot resolve remote path {remote_path}: {exc}") from exc
+
     async def read_file(
         self,
         target: SSHTarget,

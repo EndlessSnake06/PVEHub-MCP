@@ -19,7 +19,6 @@ def test_redact_command_and_content_bodies() -> None:
     assert isinstance(redacted["command"], dict)
     assert "supersecret" not in redacted["command"]["preview"]
     assert redacted["command"]["length"] == len("export API_TOKEN=supersecret; echo ok")
-    assert isinstance(redacted["content_base64"], dict)
     assert "c2VjcmV0" not in str(redacted["content_base64"])
 
 

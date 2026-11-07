@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import InvalidArgument
+from ..validation import api_segment
 from .common import guest_summary, node_summary, ok, pick, storage_summary
 
 _CLUSTER_KEYS = (
@@ -181,6 +182,7 @@ def register(hub: Any) -> None:
     )
     async def pve_node_status(node: str, instance: str | None = None) -> str:
         """Show a node's PVE version, CPU, memory, root filesystem and load average."""
+        node = api_segment(node, "node")
         client = hub.pve(instance)
         data = await client.get(f"/nodes/{node}/status")
         payload = {"node": node, "status": pick(data, _NODE_STATUS_KEYS)}
@@ -210,6 +212,7 @@ def register(hub: Any) -> None:
             raise InvalidArgument(f"unknown cf {cf!r}; expected one of {sorted(_RRD_CONSOLIDATION)}")
         if limit < 1 or limit > 1000:
             raise InvalidArgument("limit must be between 1 and 1000")
+        node = api_segment(node, "node")
         client = hub.pve(instance)
         params: dict[str, Any] = {"timeframe": timeframe}
         if cf is not None:

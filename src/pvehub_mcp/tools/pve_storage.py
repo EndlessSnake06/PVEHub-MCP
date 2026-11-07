@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import InvalidArgument
+from ..validation import api_segment
 from .common import ok, pick, storage_summary
 
 _CONTENT_KEYS = (
@@ -57,6 +58,7 @@ def register(hub: Any) -> None:
         """
         client = hub.pve(instance)
         if node is not None:
+            node = api_segment(node, "node")
             data = await client.get(f"/nodes/{node}/storage")
         else:
             params = {"type": type} if type else None
@@ -79,6 +81,8 @@ def register(hub: Any) -> None:
         instance: str | None = None,
     ) -> str:
         """Show one storage's status on a node (active, total, used, available)."""
+        node = api_segment(node, "node")
+        storage = api_segment(storage, "storage")
         client = hub.pve(instance)
         data = await client.get(f"/nodes/{node}/storage/{storage}/status")
         payload = {"node": node, "storage": storage, "status": storage_summary(data)}
@@ -105,6 +109,8 @@ def register(hub: Any) -> None:
             raise InvalidArgument(
                 f"unknown content type {content!r}; expected one of {sorted(_CONTENT_TYPES)}"
             )
+        node = api_segment(node, "node")
+        storage = api_segment(storage, "storage")
         client = hub.pve(instance)
         params: dict[str, Any] = {}
         if content is not None:

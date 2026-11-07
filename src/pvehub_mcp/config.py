@@ -216,6 +216,13 @@ class Settings(BaseModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     allow_insecure_http: bool = False
 
+    @field_validator("mcp_auth_token")
+    @classmethod
+    def _token_not_blank(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and not value.get_secret_value().strip():
+            raise ValueError("mcp_auth_token must not be empty")
+        return value
+
     @model_validator(mode="after")
     def _validate(self) -> Settings:
         if not self.pve and not self.pbs:

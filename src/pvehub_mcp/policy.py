@@ -12,7 +12,7 @@ import hashlib
 import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 from urllib.parse import unquote
 
@@ -337,6 +337,8 @@ class Policy:
     def check_file_path(self, path: str) -> None:
         if "\x00" in path:
             raise InvalidArgument("path contains a NUL byte")
+        if ".." in PurePosixPath(path).parts:
+            raise PolicyError(f"path {path!r} must not contain '..' segments", details={"path": path})
         roots = self.file.exec.files.allowed_roots
         if not roots:
             return
@@ -423,6 +425,8 @@ def normalize_api_path(path: str) -> str | None:
         candidate = decoded
     if "%" in candidate:
         return None
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in candidate):
+        return None
     candidate = re.sub(r"/{2,}", "/", candidate)
     parts: list[str] = []
     for part in candidate.split("/"):
@@ -455,25 +459,34 @@ def _vmid_from_path(path: str) -> int | None:
 
 
 def _coerce_vmids(value: Any, field: str) -> list[int]:
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, bool):
+        raise InvalidArgument(f"generic API parameter {field} must be an integer")
+    if isinstance(value, int):
+        raw_values: list[Any] = [value]
+    elif isinstance(value, (list, tuple)):
         raw_values = list(value)
-    elif isinstance(value, str) and "," in value:
-        raw_values = [part.strip() for part in value.split(",") if part.strip()]
     else:
-        raw_values = [value]
+        raise InvalidArgument(
+            f"generic API parameter {field} must be an integer or a list of integers"
+        )
     result: list[int] = []
     for item in raw_values:
-        try:
-            result.append(int(item))
-        except (TypeError, ValueError) as exc:
-            raise InvalidArgument(f"generic API parameter {field} must contain integers") from exc
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise InvalidArgument(
+                f"generic API parameter {field} must be an integer or a list of integers"
+            )
+        result.append(item)
     return result
 
 
 def _contains_secret_param(value: Any) -> bool:
     if isinstance(value, dict):
         for key, item in value.items():
-            if str(key).lower() in {"password", "passwd", "secret", "token"}:
+            lowered = str(key).lower()
+            if any(
+                marker in lowered
+                for marker in ("password", "passwd", "secret", "token", "api_key", "apikey")
+            ):
                 return True
             if _contains_secret_param(item):
                 return True
