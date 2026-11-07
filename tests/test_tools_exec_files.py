@@ -340,3 +340,37 @@ async def test_file_write_guest_accepts_wrapped_base64(exec_env: Any) -> None:
     assert result["ok"] is True
     assert form(route.calls[0].request)["content"] == ["aGVsbG8="]
     assert result["data"]["bytes"] == 5
+
+
+async def test_file_pull_host_rejects_dotdot_traversal(
+    exec_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called = False
+
+    async def fake_read(*args: Any, **kwargs: Any) -> bytes:
+        nonlocal called
+        called = True
+        return b"secret"
+
+    monkeypatch.setattr(exec_env.hub.ssh, "read_file", fake_read)
+
+    result = await exec_env.call(
+        "file_pull_host", node="pve1", remote_path="/etc/pve/../root/.ssh/id_ed25519"
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "policy_denied"
+    assert called is False
+
+
+async def test_file_push_host_rejects_dotdot_traversal(exec_env: Any) -> None:
+    result = await exec_env.call(
+        "file_push_host",
+        node="pve1",
+        remote_path="/var/tmp/pvehub/../root/authorized_keys",
+        content_base64=encode(b"ssh-ed25519 AAAA"),
+        confirm=True,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "policy_denied"

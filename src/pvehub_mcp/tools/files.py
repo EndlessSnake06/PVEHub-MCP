@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+from pathlib import PurePosixPath
 from typing import Any
 
-from ..errors import InvalidArgument
+from ..errors import InvalidArgument, PolicyError
 from .common import ok
 from .exec_vm import MAX_FILE_BYTES, agent_get, agent_post, resolve_guest
 
@@ -38,6 +39,22 @@ def _check_path(path: str) -> None:
         raise InvalidArgument("path contains a NUL byte")
 
 
+def _check_sftp_path(path: str) -> None:
+    """Reject traversal before ``policy.check_file_path`` prefix matching.
+
+    ``policy.check_file_path`` compares the raw path against allowed roots, so a
+    path such as ``/etc/pve/../root/.ssh`` would pass a prefix check. Refuse any
+    ``..`` component for SFTP targets.
+    """
+
+    _check_path(path)
+    if ".." in PurePosixPath(path).parts:
+        raise PolicyError(
+            f"path {path!r} must not contain '..' segments",
+            details={"path": path},
+        )
+
+
 def _check_max_bytes(max_bytes: int) -> int:
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int):
         raise InvalidArgument("max_bytes must be an integer")
@@ -46,15 +63,31 @@ def _check_max_bytes(max_bytes: int) -> int:
     return min(max_bytes, MAX_FILE_BYTES)
 
 
-def _decode_base64(content_base64: str, *, field: str = "content_base64") -> bytes:
+def _decode_base64(
+    content_base64: str, *, limit: int, field: str = "content_base64"
+) -> bytes:
     if not isinstance(content_base64, str):
         raise InvalidArgument(f"{field} must be a base64 string")
     # Accept line-wrapped base64 (the output of the standard `base64` CLI).
     cleaned = "".join(content_base64.split())
+    # Reject oversized payloads before decoding so a huge request cannot exhaust
+    # memory: base64 uses 4 characters per 3 bytes (plus padding).
+    max_encoded = ((limit + 2) // 3) * 4 + 4
+    if len(cleaned) > max_encoded:
+        raise InvalidArgument(
+            f"content exceeds the limit of {limit} bytes",
+            details={"encoded_length": len(cleaned), "max_bytes": limit},
+        )
     try:
-        return base64.b64decode(cleaned, validate=True)
+        data = base64.b64decode(cleaned, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise InvalidArgument(f"{field} is not valid base64: {exc}") from exc
+    if len(data) > limit:
+        raise InvalidArgument(
+            f"content exceeds the limit of {limit} bytes",
+            details={"bytes": len(data), "max_bytes": limit},
+        )
+    return data
 
 
 def register(hub: Any) -> None:
@@ -146,12 +179,7 @@ def register(hub: Any) -> None:
         running qemu-guest-agent and VM.Monitor on /vms/{vmid}.
         """
         _check_path(path)
-        data = _decode_base64(content_base64)
-        if len(data) > MAX_FILE_BYTES:
-            raise InvalidArgument(
-                f"content exceeds the guest-agent limit of {MAX_FILE_BYTES} bytes",
-                details={"bytes": len(data), "max_bytes": MAX_FILE_BYTES},
-            )
+        data = _decode_base64(content_base64, limit=MAX_FILE_BYTES)
         _resource, guest_node = await resolve_guest(hub, vmid, instance, kind="qemu")
         if node is not None and node != guest_node:
             raise InvalidArgument(
@@ -199,7 +227,7 @@ def register(hub: Any) -> None:
         PVEHUB_MAX_OUTPUT_BYTES (raise it for large files). The path must be inside
         exec.files.allowed_roots when that list is set.
         """
-        _check_path(remote_path)
+        _check_sftp_path(remote_path)
         limit = _check_max_bytes(max_bytes)
         hub.policy.check_file_path(remote_path)
         target = hub.ssh.node_target(node)
@@ -234,13 +262,8 @@ def register(hub: Any) -> None:
         writes; the path must be inside exec.files.allowed_roots when that list
         is set.
         """
-        _check_path(remote_path)
-        data = _decode_base64(content_base64)
-        if len(data) > MAX_FILE_BYTES:
-            raise InvalidArgument(
-                f"content exceeds the SFTP limit of {MAX_FILE_BYTES} bytes",
-                details={"bytes": len(data), "max_bytes": MAX_FILE_BYTES},
-            )
+        _check_sftp_path(remote_path)
+        data = _decode_base64(content_base64, limit=MAX_FILE_BYTES)
         hub.policy.check_file_path(remote_path)
         target = hub.ssh.node_target(node)
         await hub.ssh.write_file(target, remote_path, data, max_bytes=MAX_FILE_BYTES)
