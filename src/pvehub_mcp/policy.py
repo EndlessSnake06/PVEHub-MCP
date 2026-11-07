@@ -284,6 +284,18 @@ class Policy:
                 raise PolicyError(
                     f"vmid {vmid} in {normalized} is outside exec.allowed_vmids"
                 )
+            for key in ("vmid", "newid"):
+                if not params or key not in params:
+                    continue
+                try:
+                    requested = int(params[key])
+                except (TypeError, ValueError) as exc:
+                    raise InvalidArgument(f"generic API parameter {key} must be an integer") from exc
+                if not self.file.exec.vmid_allowed(requested):
+                    raise PolicyError(
+                        f"{key} {requested} is outside exec.allowed_vmids",
+                        details={key: requested},
+                    )
         if params and _contains_secret_param(params):
             raise PolicyError("generic API parameters must not contain password/secret/token keys")
 

@@ -98,6 +98,19 @@ def test_generic_vmid_gate() -> None:
         policy.check_generic("POST", "/nodes/pve1/qemu/999/status/start")
 
 
+def test_generic_vmid_parameter_gate() -> None:
+    policy = _policy(exec={"allowed_vmids": ["100-110"]})
+    policy.check_generic("POST", "/nodes/pve1/qemu", {"vmid": 105})
+    with pytest.raises(PolicyError):
+        policy.check_generic("POST", "/nodes/pve1/qemu", {"vmid": 500})
+    with pytest.raises(PolicyError):
+        policy.check_generic(
+            "POST", "/nodes/pve1/qemu/105/clone", {"newid": 500}
+        )
+    with pytest.raises(InvalidArgument):
+        policy.check_generic("POST", "/nodes/pve1/qemu", {"vmid": "abc"})
+
+
 def test_command_denylist() -> None:
     policy = _policy()
     with pytest.raises(PolicyError):
