@@ -33,13 +33,18 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
     healthcheck:
+      # Probes the authenticated /ready endpoint (503 while degraded) with the
+      # token from .env; the unauthenticated /health liveness probe is not a
+      # readiness signal. See docs/CONFIGURATION.md and docs/DECISIONS.md D021.
       test:
         - CMD
         - python
         - -c
         - >-
-          import sys,urllib.request;
-          sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).status == 200 else 1)
+          import os,sys,urllib.request as u;
+          t=os.environ.get('PVEHUB_MCP_AUTH_TOKEN','');
+          h={'Authorization':'Bearer '+t} if t else {};
+          sys.exit(0 if u.urlopen(u.Request('http://127.0.0.1:8080/ready', headers=h), timeout=4).status==200 else 1)
       interval: 30s
       timeout: 5s
       retries: 3

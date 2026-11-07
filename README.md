@@ -18,7 +18,8 @@ hosts, LXC containers, QEMU VMs (guest agent) and the PBS host.
   privilege are not registered, and each call is pre-checked.
 - **Blockable** — every tool and category can be denied via YAML/env policy; denied tools do
   not appear in `tools/list`.
-- **One container, one endpoint** — Streamable HTTP at `/mcp`, `/health`, optional stdio.
+- **One container, one endpoint** — Streamable HTTP at `/mcp` (bearer), `GET /ready`
+  readiness (bearer), unauthenticated `GET /health` liveness, optional stdio.
 
 ## Architecture
 
@@ -26,7 +27,7 @@ hosts, LXC containers, QEMU VMs (guest agent) and the PBS host.
 flowchart LR
   client["MCP client<br/>Claude, Hermes, Open WebUI"]
   subgraph hub["pvehub-mcp container (UID 10001)"]
-    server["server.py<br/>/mcp · /health<br/>bearer auth"]
+    server["server.py<br/>/mcp · /ready · /health<br/>bearer auth"]
     policy["policy.py<br/>categories · allow/deny<br/>generic API gates"]
     caps["capabilities.py<br/>token privileges"]
     tools["tools/<br/>curated + generic"]
@@ -51,8 +52,13 @@ cp .env.example .env
 mkdir -p config ssh
 cp config/examples/operator.yaml config/policy.yaml
 docker compose up -d --build
-curl -s http://127.0.0.1:8080/health
+curl -s http://127.0.0.1:8080/health   # liveness: {"status":"ok"}
 ```
+
+`GET /health` is a minimal liveness probe — no version, no tool count, no backend state.
+The readiness signal is the authenticated `GET /ready` endpoint: same bearer as `/mcp`,
+full health body, HTTP `503` while any backend is degraded. The container healthcheck
+runs exactly that probe (see `docs/CONFIGURATION.md` and `docs/DECISIONS.md` D021).
 
 `docker compose` reads `.env`, mounts `./config` and `./ssh` read-only, keeps `/data`
 (audit log, caches) in the named volume `pvehub-data`, runs the container read-only with
@@ -215,6 +221,11 @@ Notes:
   bind address). `PVEHUB_MCP_AUTH_REQUIRED=false` is an explicit, logged
   opt-out for loopback development setups only; a non-loopback bind without a
   token is refused even with the opt-out.
+- Health endpoints: `GET /health` is an unauthenticated **liveness** probe
+  (`{"status": "ok"}` only — no version, no tool count). `GET /ready` is the
+  **readiness** endpoint: authenticated with the same bearer as `/mcp`, full health
+  body, HTTP `503` while any backend is degraded. Container and external readiness
+  monitors must use `/ready` with the token (see `docs/DECISIONS.md` D021).
 - Use a dedicated PVE/PBS API token with the minimum ACLs and no expiry surprises.
 - Start with `config/examples/readonly.yaml`; widen to `operator.yaml` when needed.
   `admin.yaml` (destructive + host shells) is for trusted single-operator setups only.
@@ -239,14 +250,14 @@ Notes:
 | `mcp_auth_token is required for the http transport` | Set `PVEHUB_MCP_AUTH_TOKEN` (see `docs/CONFIGURATION.md`), or `PVEHUB_MCP_AUTH_REQUIRED=false` for loopback development setups |
 | `configuration error: ... extra_forbidden` | Unknown YAML key; compare with `docs/CONFIGURATION.md`. `extra="forbid"` is intentional |
 | `policy error: ... invalid policy` | Unknown category or key in `policy.yaml`; valid categories are `read`, `lifecycle`, `write`, `destructive`, `exec`, `generic` |
-| `401 unauthorized` on `/mcp` | Missing/wrong `Authorization: Bearer ...` header |
+| `401 unauthorized` on `/mcp` or `/ready` | Missing/wrong `Authorization: Bearer *** header |
 | `421 Invalid Host header` or DNS-rebinding error | Set `PVEHUB_ALLOWED_HOSTS` to the hostnames clients use (including port if non-default) |
 | `docker compose` complains about `.env` | `cp .env.example .env` first; compose requires the file |
 | Tool missing from `tools/list` | Policy deny, category deny, missing token privilege, missing SSH target/key, or `exec.host`/`exec.pbs_host` disabled. Ask `pvehub_capabilities` for `tools.blocked` reasons |
-| `/health` shows `degraded` | Permission discovery failed for at least one instance; the server still serves tools per `capabilities_fail_open`. Check logs and token ACLs |
+| `GET /ready` returns `503` (`degraded`) | Capability discovery failed for at least one instance (bad/revoked token, API unreachable); the server still serves tools per `capabilities_fail_open`, but the container healthcheck marks the container `unhealthy`. Check logs and token ACLs |
 | SSH `key not found` / `known_hosts not found` | Wrong mount path, wrong UID/permissions, or missing `ssh.nodes` entry for the node |
 | `sudo: a password is required` | `sudo: true` is set but no NOPASSWD rule for `pct` exists on the node |
-| Container `unhealthy` while using stdio | Expected: there is no HTTP listener, so the `/health` check fails. Harmless for `docker run -i` |
+| Container `unhealthy` while using stdio | Expected: there is no HTTP listener, so the `/ready` probe cannot succeed. Harmless for `docker run -i` |
 | Changes to policy/token ACLs have no effect | Settings and policy are read at startup; restart the container |
 
 ## Documentation
