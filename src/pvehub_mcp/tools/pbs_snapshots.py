@@ -6,7 +6,7 @@ from typing import Any
 
 from ..errors import InvalidArgument
 from . import pbs_common
-from .common import ok, parse_vmid_from_upid, pick
+from .common import ok, parse_upid_node, pick
 
 _SNAPSHOT_FIELDS = (
     "backup-type",
@@ -51,7 +51,7 @@ async def _wait_for_upid(
 ) -> dict[str, Any] | None:
     if not wait or not isinstance(upid, str) or not upid.startswith("UPID:"):
         return None
-    node = parse_vmid_from_upid(upid) or "localhost"
+    node = parse_upid_node(upid) or "localhost"
     result: dict[str, Any] = await client.wait_task(
         node,
         upid,
