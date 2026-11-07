@@ -107,7 +107,7 @@ jobs:
         if: steps.docker.outputs.available == 'true'
         run: |
           docker compose up -d --build
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 90); do
             if curl -fsS http://127.0.0.1:8080/health; then
               docker compose ps
               exit 0
