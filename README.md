@@ -3,9 +3,9 @@
 One MCP server for **Proxmox VE** and **Proxmox Backup Server**, plus shell access to PVE
 hosts, LXC containers, QEMU VMs (guest agent) and the PBS host.
 
-> Status: `0.1.0` — core server, policy engine and packaging are in place; curated tool
-> modules are still being implemented. `docs/TOOLS.md` is generated from the code and shows
-> exactly what exists today.
+> Status: `0.1.0` — core server, policy engine, curated PVE/PBS/exec tools and packaging are
+> implemented. `docs/TOOLS.md` is generated from the code and shows exactly what exists today;
+> `docs/STATUS.md` separates live-verified, mocked and untested behaviour.
 
 ## Features
 
@@ -63,7 +63,9 @@ put a TLS reverse proxy in front of it, or change the port mapping to
 The API token needs the privileges of the tools you want to use. Start read-only:
 
 ```
-PVE:  Datastore.Audit, Sys.Audit, VM.Audit, VM.Monitor
+PVE:  Datastore.Audit, Sys.Audit, VM.Audit
+PVE (exec/files): VM.GuestAgent.Unrestricted, VM.GuestAgent.FileRead, VM.GuestAgent.FileWrite,
+                  VM.GuestAgent.Audit
 PBS:  Datastore.Audit, Sys.Audit
 ```
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..errors import InvalidArgument
+from ..errors import ConfirmRequired, InvalidArgument
 from . import pbs_common
 from .common import ok, parse_upid_node, pick
 
@@ -153,9 +153,19 @@ def register(hub: Any) -> None:
         backup_time: int,
         protected: bool = True,
         ns: str | None = None,
+        confirm: bool = False,
         instance: str | None = None,
     ) -> str:
-        """Enable or disable prune protection for one backup snapshot."""
+        """Enable or disable prune protection for one backup snapshot.
+
+        Disabling protection requires confirm=true: it makes the snapshot eligible for
+        pruning again.
+        """
+        if not protected and not confirm:
+            raise ConfirmRequired(
+                "disabling snapshot protection requires confirm=true",
+                details={"tool": "pbs_snapshot_protect", "protected": False},
+            )
         name = pbs_common.store_name(store)
         reference = _snapshot_ref(name, backup_type, backup_id, backup_time, ns)
         client = hub.pbs(instance)

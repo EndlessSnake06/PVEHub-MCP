@@ -47,31 +47,34 @@ and every tool/category can be blocked through configuration.
 
 ## Phase 3 — PVE tools
 
-- [ ] Generic `pve_api_schema` + `pve_api_call` with cached `apidoc.js` index.
-- [ ] Curated cluster/node/guest/snapshot/clone/migrate/storage/backup/restore/task/firewall/HA/network/access tools.
-- [ ] Unit tests with `respx`; category and confirmation coverage.
+- [x] Generic `pve_api_schema` + `pve_api_call` with cached `apidoc.js` index.
+- [x] Curated cluster/node/guest/snapshot/clone/migrate/storage/backup/restore/task/firewall/HA/network/access tools (40).
+- [x] Unit tests with `respx`; category and confirmation coverage.
+- [x] Privilege requirements aligned with the live `apidoc.js` permission checks.
 
 ## Phase 4 — PBS tools
 
-- [ ] Generic `pbs_api_schema` + `pbs_api_call`.
-- [ ] Datastores, namespaces, snapshots (protect/forget), prune dry-run, GC, verify, jobs, remotes, tasks, health.
-- [ ] Unit tests with `respx`.
+- [x] Generic `pbs_api_schema` + `pbs_api_call`.
+- [x] Datastores, namespaces, snapshots (protect/forget), prune dry-run, GC, verify, jobs, remotes, tasks, health (20).
+- [x] Unit tests with `respx`; dry-run and confirm covered.
 
 ## Phase 5 — Shell / exec
 
-- [ ] `exec_vm` via guest agent (start, poll, stdout/stderr/exit code, timeout).
-- [ ] `exec_lxc` via SSH + `pct exec` with strict quoting; `exec_host` and `exec_pbs` opt-in.
-- [ ] File transfer (guest-agent read/write, SFTP for hosts) with size limits.
-- [ ] Exec gating: category, allowed VMIDs, confirm, output limits, audit.
-- [ ] Quoting tests with injection payloads.
+- [x] `exec_vm` via guest agent (start, poll, stdout/stderr/exit code, timeout).
+- [x] `exec_lxc` via SSH + `pct exec` with strict quoting; `exec_host` and `exec_pbs` opt-in.
+- [x] File transfer (guest-agent read/write, SFTP for hosts) with size limits.
+- [x] Exec gating: category, allowed VMIDs, confirm, output limits, audit.
+- [x] Quoting tests with injection payloads (`'; rm -rf /`, backticks, `$()`, newlines) and a fake `pct`.
 
 ## Phase 6 — Docker, CI, docs
 
-- [ ] Multi-stage Dockerfile (non-root, healthcheck, multi-arch build instructions).
-- [ ] `docker-compose.yml`, example policies.
-- [ ] Gitea Actions workflow + `Makefile` fallback.
-- [ ] README (quickstart, Mermaid diagram, tool catalog, security, client examples).
-- [ ] `docs/CONFIGURATION.md`, `docs/TOOLS.md` (generated).
+- [x] Multi-stage Dockerfile (non-root, healthcheck, multi-arch build instructions).
+- [x] `docker-compose.yml`, example policies.
+- [x] Gitea Actions workflow + `Makefile` fallback.
+- [x] README (quickstart, Mermaid diagram, tool catalog, security, client examples).
+- [x] `docs/CONFIGURATION.md`, `docs/TOOLS.md` (generated).
+- [!] Image build and CI execution not possible in this sandbox (no Docker daemon/runner);
+  static validation and local entrypoint installation were performed. See `docs/STATUS.md`.
 
 ## Phase 7 — Hardening and review
 

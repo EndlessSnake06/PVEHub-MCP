@@ -439,7 +439,9 @@ maps the token's effective privileges onto the declared tool requirements
 - Permissions are refreshed every `capabilities_refresh_seconds`; the registered
   tool set is fixed for the process lifetime (restart to re-evaluate).
 - Required token privileges for a read-only start: PVE `Datastore.Audit`,
-  `Sys.Audit`, `VM.Audit`, `VM.Monitor`; PBS `Datastore.Audit`, `Sys.Audit`.
+  `Sys.Audit`, `VM.Audit`; PBS `Datastore.Audit`, `Sys.Audit`. For guest exec/files:
+  PVE `VM.GuestAgent.Unrestricted`, `VM.GuestAgent.FileRead`, `VM.GuestAgent.FileWrite`,
+  `VM.GuestAgent.Audit`.
 
 ## Container notes
 
