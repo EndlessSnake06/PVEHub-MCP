@@ -132,8 +132,8 @@ Same keys with the `PBS` prefix and PBS defaults:
 | `PVEHUB_SSH_CONNECT_TIMEOUT` | `10` | Connect/login timeout in seconds | no |
 | `PVEHUB_SSH_NODES_JSON` | unset | JSON object `{"<pve-node>": {"host": "...", ...}}` | no |
 | `PVEHUB_SSH_PBS_HOST` | unset | PBS host for `exec_pbs` / PBS file tools | no |
-| `PVEHUB_SSH_PBS_USER` | unset | PBS SSH user (falls back to `ssh.user`) | no |
-| `PVEHUB_SSH_PBS_KEY_PATH` | unset | PBS key path (falls back to `ssh.key_path`) | no |
+| `PVEHUB_SSH_PBS_USER` | unset | PBS SSH user (target default `pvehub`, not `ssh.user`) | no |
+| `PVEHUB_SSH_PBS_KEY_PATH` | unset | PBS key path (target default `/ssh/id_ed25519`) | no |
 
 ### Policy overrides
 
@@ -271,8 +271,11 @@ allow_insecure_http: false
 
 Target keys (under `nodes.<name>` and `pbs`): `host` (required), `port`, `user`,
 `key_path`, `known_hosts`, `strict_host_key`, `connect_timeout`, `sudo`.
-Omitted values inherit from `ssh.*`. `sudo: true` wraps `pct exec` as `sudo -n`
-(passwordless sudo must be configured on the node).
+Entries under `nodes.<name>` inherit omitted values from `ssh.*`; the separate
+`ssh.pbs` target does **not** inherit from `ssh.*` and falls back to the target
+defaults (`pvehub`, `/ssh/id_ed25519`, port 22) — set `user`/`key_path` explicitly
+when they differ. `sudo: true` wraps `pct exec` as `sudo -n` (passwordless sudo must
+be configured on the node).
 
 The node key must match the PVE node name exactly (`pvesh get /nodes`). SSH is only
 used for the node that actually hosts the guest; the server does not guess.
