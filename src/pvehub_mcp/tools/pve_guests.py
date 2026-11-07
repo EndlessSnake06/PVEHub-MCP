@@ -362,7 +362,7 @@ def register(hub: Any) -> None:
         category="write",
         pve=[
             ("VM.Clone", "/vms/{vmid}"),
-            ("VM.Allocate", "/vms"),
+            ("VM.Allocate", "/vms/{newid}"),
             ("Datastore.AllocateSpace", "/storage"),
         ],
         service="pve",
@@ -475,7 +475,7 @@ def register(hub: Any) -> None:
         name="pve_guest_create_lxc",
         category="write",
         pve=[
-            ("VM.Allocate", "/vms"),
+            ("VM.Allocate", "/vms/{vmid}"),
             ("Datastore.AllocateSpace", "/storage/{storage}"),
         ],
         service="pve",
@@ -547,7 +547,7 @@ def register(hub: Any) -> None:
         name="pve_guest_create_vm",
         category="write",
         pve=[
-            ("VM.Allocate", "/vms"),
+            ("VM.Allocate", "/vms/{vmid}"),
             ("Datastore.AllocateSpace", "/storage/{storage}"),
         ],
         service="pve",
@@ -700,7 +700,7 @@ def register(hub: Any) -> None:
     @hub.tool(
         name="pve_guest_agent_ping",
         category="read",
-        pve=[("VM.Monitor", "/vms/{vmid}")],
+        pve=[("VM.GuestAgent.Audit", "/vms/{vmid}")],
         service="pve",
     )
     async def pve_guest_agent_ping(

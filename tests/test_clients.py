@@ -126,6 +126,24 @@ async def test_get_retries_on_503() -> None:
 
 
 @respx.mock
+async def test_delete_parameters_are_query_parameters() -> None:
+    captured: dict[str, list[str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(parse_qs(request.url.query.decode()))
+        return httpx.Response(200, json={"data": None})
+
+    respx.delete("https://pve.test:8006/api2/json/nodes/pve1/qemu/100").mock(
+        side_effect=handler
+    )
+    client = pve_client()
+    await client.delete("/nodes/pve1/qemu/100", {"purge": True, "destroy-unreferenced-disks": True})
+    assert captured["purge"] == ["1"]
+    assert captured["destroy-unreferenced-disks"] == ["1"]
+    await client.aclose()
+
+
+@respx.mock
 async def test_schema_parse_and_describe(tmp_path) -> None:
     schema = [
         {

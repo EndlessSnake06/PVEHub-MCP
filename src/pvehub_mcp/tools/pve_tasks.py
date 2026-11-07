@@ -112,7 +112,7 @@ def register(hub: Any) -> None:
     @hub.tool(
         name="pve_task_stop",
         category="destructive",
-        pve=[("Sys.Audit", "/nodes/{node}")],
+        pve=[("Sys.Modify", "/nodes/{node}")],
         service="pve",
     )
     async def pve_task_stop(

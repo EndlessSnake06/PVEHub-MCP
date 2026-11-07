@@ -119,7 +119,7 @@ def register(hub: Any) -> None:
         name="pve_backup_restore",
         category="destructive",
         pve=[
-            ("VM.Allocate", "/vms"),
+            ("VM.Allocate", "/vms/{vmid}"),
             ("Datastore.AllocateSpace", "/storage/{storage}"),
         ],
         service="pve",

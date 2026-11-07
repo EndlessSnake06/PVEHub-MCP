@@ -318,6 +318,10 @@ class PVEHub:
             if self.settings.ssh.pbs is None:
                 return False, "no SSH target configured for PBS (ssh.pbs)"
             return True, ""
+        if shell == "guest":
+            if not self.pve_clients:
+                return False, "no PVE instance configured"
+            return True, ""
         if shell == "files":
             if not ssh_ready:
                 return False, "no SSH target configured"

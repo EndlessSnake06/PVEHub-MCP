@@ -101,10 +101,7 @@ def register(hub: Any) -> None:
     @hub.tool(
         name="pbs_snapshot_forget",
         category="destructive",
-        pbs=[
-            ("Datastore.Modify", "/datastore/{store}"),
-            ("Datastore.Prune", "/datastore/{store}"),
-        ],
+        pbs=[("Datastore.Modify", "/datastore/{store}")],
         service="pbs",
     )
     async def pbs_snapshot_forget(
@@ -180,10 +177,7 @@ def register(hub: Any) -> None:
     @hub.tool(
         name="pbs_prune",
         category="destructive",
-        pbs=[
-            ("Datastore.Prune", "/datastore/{store}"),
-            ("Datastore.Modify", "/datastore/{store}"),
-        ],
+        pbs=[("Datastore.Modify", "/datastore/{store}")],
         service="pbs",
     )
     async def pbs_prune(

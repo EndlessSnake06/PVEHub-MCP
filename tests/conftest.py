@@ -41,6 +41,12 @@ FULL_PERMISSIONS: dict[str, dict[str, int]] = {
         "VM.Monitor": 1,
         "Datastore.Audit": 1,
         "Datastore.AllocateSpace": 1,
+        "VM.GuestAgent.Audit": 1,
+        "VM.GuestAgent.FileRead": 1,
+        "VM.GuestAgent.FileWrite": 1,
+        "VM.GuestAgent.Unrestricted": 1,
+        "Sys.Modify": 1,
+        "Sys.Syslog": 1,
         "propagate": 1,
     }
 }
@@ -347,7 +353,19 @@ async def environment(settings: Settings) -> AsyncIterator[ExecEnv]:
 def mock_services(mock: respx.MockRouter) -> None:
     mock.get(f"{PVE_URL}{API}/access/permissions").mock(
         return_value=httpx.Response(
-            200, json={"data": {"/": {"VM.Monitor": 1, "propagate": 1}}}
+            200,
+            json={
+                "data": {
+                    "/": {
+                        "VM.Monitor": 1,
+                        "VM.GuestAgent.Audit": 1,
+                        "VM.GuestAgent.FileRead": 1,
+                        "VM.GuestAgent.FileWrite": 1,
+                        "VM.GuestAgent.Unrestricted": 1,
+                        "propagate": 1,
+                    }
+                }
+            },
         )
     )
     mock.get(f"{PVE_URL}{API}/cluster/resources").mock(

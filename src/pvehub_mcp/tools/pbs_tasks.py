@@ -28,7 +28,7 @@ def register(hub: Any) -> None:
     @hub.tool(
         name="pbs_tasks_list",
         category="read",
-        pbs=[("Sys.Audit", "/")],
+        pbs=[("Sys.Audit", "/system")],
         service="pbs",
     )
     async def pbs_tasks_list(
@@ -76,7 +76,7 @@ def register(hub: Any) -> None:
     @hub.tool(
         name="pbs_task_status",
         category="read",
-        pbs=[("Sys.Audit", "/")],
+        pbs=[("Sys.Audit", "/system")],
         service="pbs",
     )
     async def pbs_task_status(
@@ -94,7 +94,7 @@ def register(hub: Any) -> None:
     @hub.tool(
         name="pbs_task_log",
         category="read",
-        pbs=[("Sys.Audit", "/")],
+        pbs=[("Sys.Audit", "/system")],
         service="pbs",
     )
     async def pbs_task_log(

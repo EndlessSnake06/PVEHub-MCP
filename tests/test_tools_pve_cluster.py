@@ -27,7 +27,8 @@ async def test_cluster_tools_registered_as_read(pve: Any) -> None:
         registered = hub.registered[name]
         assert registered.category == "read"
         assert registered.pve_privileges
-        assert all(privilege.priv == "Sys.Audit" for privilege in registered.pve_privileges)
+        expected = {"Sys.Syslog"} if name == "pve_cluster_log" else {"Sys.Audit"}
+        assert {privilege.priv for privilege in registered.pve_privileges} <= expected
 
 
 async def test_cluster_status_returns_compact_entries(pve: Any, call: Any) -> None:

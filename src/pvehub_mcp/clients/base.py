@@ -153,7 +153,7 @@ class BaseProxmoxClient:
         return await self._request("PUT", path, data=data, retry=False)
 
     async def delete(self, path: str, data: dict[str, Any] | None = None) -> Any:
-        return await self._request("DELETE", path, data=data, retry=False)
+        return await self._request("DELETE", path, params=data, retry=False)
 
     def _parse(self, response: httpx.Response) -> Any:
         request_path = response.request.url.path

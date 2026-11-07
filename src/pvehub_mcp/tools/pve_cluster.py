@@ -269,7 +269,7 @@ def register(hub: Any) -> None:
     @hub.tool(
         name="pve_cluster_log",
         category="read",
-        pve=[("Sys.Audit", "/")],
+        pve=[("Sys.Syslog", "/")],
         service="pve",
     )
     async def pve_cluster_log(max: int = 50, instance: str | None = None) -> str:

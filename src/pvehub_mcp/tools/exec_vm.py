@@ -2,7 +2,7 @@
 
 The guest agent is reachable through the PVE REST API only; the VM must run
 ``qemu-guest-agent`` and the agent channel must be enabled. PVE checks
-``VM.Monitor`` on ``/vms/{vmid}`` for ``agent/exec``, ``agent/exec-status``,
+``VM.GuestAgent.Unrestricted`` on ``/vms/{vmid}`` for ``agent/exec`` and
 ``agent/file-read`` and ``agent/file-write`` (verified against the PVE
 ``Agent.pm`` permission definitions).
 
@@ -242,7 +242,7 @@ def register(hub: Any) -> None:
     @hub.tool(  # noqa: S604 - 'shell' is the SSH transport gate, not subprocess
         name="exec_vm",
         category="exec",
-        pve=[("VM.Monitor", "/vms/{vmid}")],
+        pve=[("VM.GuestAgent.Unrestricted", "/vms/{vmid}")],
         shell="vm",
     )
     async def exec_vm(
@@ -258,7 +258,7 @@ def register(hub: Any) -> None:
         The command is executed as ``/bin/sh -c <command>``. Output is capped by
         exec.max_output_bytes, the call by exec.timeout_seconds (request max 600 s).
         A timeout returns timed_out=true instead of raising. Requires a running
-        qemu-guest-agent and VM.Monitor on /vms/{vmid}.
+        qemu-guest-agent and VM.GuestAgent.Unrestricted on /vms/{vmid}.
         """
         hub.policy.check_command(command)
         _resource, guest_node = await resolve_guest(hub, vmid, instance, kind="qemu")

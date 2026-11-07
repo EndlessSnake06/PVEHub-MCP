@@ -94,8 +94,8 @@ def register(hub: Any) -> None:
     @hub.tool(  # noqa: S604 - 'shell' is the SSH/agent transport gate, not subprocess
         name="file_read_guest",
         category="read",
-        pve=[("VM.Monitor", "/vms/{vmid}")],
-        shell="vm",
+        pve=[("VM.GuestAgent.FileRead", "/vms/{vmid}")],
+        shell="guest",
     )
     async def file_read_guest(
         vmid: int,
@@ -110,7 +110,7 @@ def register(hub: Any) -> None:
         result reports truncated=true when the file is larger than the effective
         limit. The serialized response is also bounded by PVEHUB_MAX_OUTPUT_BYTES,
         so raise that setting (about 1.4x the file size) for large reads. Requires
-        a running qemu-guest-agent and VM.Monitor on /vms/{vmid}.
+        a running qemu-guest-agent and VM.GuestAgent.FileRead on /vms/{vmid}.
         """
         _check_path(path)
         limit = _check_max_bytes(max_bytes)
@@ -160,8 +160,8 @@ def register(hub: Any) -> None:
     @hub.tool(  # noqa: S604 - 'shell' is the SSH/agent transport gate, not subprocess
         name="file_write_guest",
         category="write",
-        pve=[("VM.Monitor", "/vms/{vmid}")],
-        shell="vm",
+        pve=[("VM.GuestAgent.FileWrite", "/vms/{vmid}")],
+        shell="guest",
     )
     async def file_write_guest(
         vmid: int,
@@ -176,7 +176,7 @@ def register(hub: Any) -> None:
         content_base64 must be standard base64; the decoded payload is capped at
         16 MiB (guest-agent limit). The file is created or truncated. Pass
         confirm=true when the policy requires confirmation for writes. Requires a
-        running qemu-guest-agent and VM.Monitor on /vms/{vmid}.
+        running qemu-guest-agent and VM.GuestAgent.FileWrite on /vms/{vmid}.
         """
         _check_path(path)
         data = _decode_base64(content_base64, limit=MAX_FILE_BYTES)
