@@ -156,7 +156,7 @@ async def test_http_health_and_bearer_auth() -> None:
     settings = _settings(
         transport="http",
         host="127.0.0.1",
-        mcp_auth_token="test-token",
+        mcp_auth_token="test-token-0123456789",
     )
     hub = PVEHub(settings, Policy(file=PolicyFile()))
     hub.build()
@@ -179,7 +179,7 @@ async def test_http_health_and_bearer_auth() -> None:
             assert wrong.status_code == 401
 
             ok = await client.post(
-                "/mcp", json={}, headers={"Authorization": "Bearer test-token"}
+                "/mcp", json={}, headers={"Authorization": "Bearer test-token-0123456789"}
             )
             assert ok.status_code != 401
 

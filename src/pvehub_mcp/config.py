@@ -227,6 +227,12 @@ class Settings(BaseModel):
                     f"instance {instance.name!r} uses http; set allow_insecure_http=true "
                     "only for isolated test environments"
                 )
+        if self.mcp_auth_token is not None:
+            token = self.mcp_auth_token.get_secret_value()
+            if not token.strip():
+                raise ValueError("mcp_auth_token must not be empty")
+            if len(token) < 16:
+                raise ValueError("mcp_auth_token must be at least 16 characters")
         if (
             self.transport == "http"
             and not _is_loopback(self.host)
