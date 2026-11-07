@@ -97,6 +97,7 @@ class AuditLogger:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 with self.path.open("a", encoding="utf-8"):
                     pass
+                self.path.chmod(0o600)
             except OSError as exc:
                 self.enabled = False
                 self.error = f"audit log disabled: {exc}"

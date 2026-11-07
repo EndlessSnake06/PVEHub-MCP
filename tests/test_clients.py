@@ -10,8 +10,9 @@ import pytest
 import respx
 
 from pvehub_mcp.clients.pbs import PBSClient
+from pvehub_mcp.clients.base import quote_path
 from pvehub_mcp.clients.pve import PVEClient, parse_apidoc_js
-from pvehub_mcp.errors import AuthenticationError, NotFound, PermissionDenied
+from pvehub_mcp.errors import AuthenticationError, InvalidArgument, NotFound, PermissionDenied
 
 
 def pve_client(**kwargs: object) -> PVEClient:
@@ -199,6 +200,13 @@ async def test_task_polling_and_log_tail() -> None:
     assert result["success"] is True
     assert "done" in result["log_tail"]
     await client.aclose()
+
+
+def test_quote_path_rejects_traversal() -> None:
+    assert quote_path("/nodes/pve1/status") == "/nodes/pve1/status"
+    for path in ("/nodes/../access", "/nodes/%2e%2e/access", "/nodes/%252e%252e/access", "/nodes/a%2fb"):
+        with pytest.raises(InvalidArgument):
+            quote_path(path)
 
 
 def test_parse_apidoc_with_prefix_and_suffix() -> None:

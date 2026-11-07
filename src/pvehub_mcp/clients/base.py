@@ -8,7 +8,7 @@ import logging
 import random
 import re
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -56,6 +56,12 @@ def encode_params(params: dict[str, Any] | None) -> dict[str, Any]:
 def quote_path(path: str) -> str:
     if not path.startswith("/"):
         raise InvalidArgument("API path must start with '/'")
+    if "\x00" in path or "\\" in path:
+        raise InvalidArgument("API path contains an illegal character")
+    for segment in path.split("/"):
+        decoded = unquote(unquote(segment))
+        if decoded in {".", ".."} or "/" in decoded:
+            raise InvalidArgument("API path must not contain dot segments or encoded slashes")
     return quote(path, safe="/!$&'()*+,;=:@-._~")
 
 
