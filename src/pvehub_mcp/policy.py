@@ -12,7 +12,7 @@ import hashlib
 import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 from urllib.parse import unquote
 
@@ -41,6 +41,8 @@ HARD_DENY_PATHS: tuple[str, ...] = (
     "/nodes/*/spiceshell",
     "/nodes/*/termproxy",
     "/nodes/*/qemu/*/monitor",
+    "/nodes/*/qemu/*/agent/exec",
+    "/nodes/*/qemu/*/agent/file-write",
 )
 
 _DEFAULT_DENY_PATHS = [
@@ -51,6 +53,8 @@ _DEFAULT_DENY_PATHS = [
     "/nodes/*/spiceshell",
     "/nodes/*/termproxy",
     "/nodes/*/qemu/*/monitor",
+    "/nodes/*/qemu/*/agent/exec",
+    "/nodes/*/qemu/*/agent/file-write",
 ]
 
 
@@ -227,7 +231,14 @@ class Policy:
         return ToolDecision(True)
 
     # -- per call ----------------------------------------------------------
-    def check_call(self, name: str, category: Category, args: dict[str, Any]) -> None:
+    def check_call(
+        self,
+        name: str,
+        category: Category,
+        args: dict[str, Any],
+        *,
+        dry_run_supported: bool = True,
+    ) -> None:
         decision = self.tool_decision(name, category)
         if not decision.allowed:
             raise PolicyError(
@@ -240,7 +251,7 @@ class Policy:
             self._check_vmid_arg(name, args)
         if category in self.file.safety.require_confirm_for:
             dry_run = bool(args.get("dry_run"))
-            if dry_run and self.file.safety.dry_run_supported:
+            if dry_run and self.file.safety.dry_run_supported and dry_run_supported:
                 return
             if not args.get("confirm"):
                 raise ConfirmRequired(
@@ -284,6 +295,20 @@ class Policy:
                 raise PolicyError(
                     f"vmid {vmid} in {normalized} is outside exec.allowed_vmids"
                 )
+            if params and str(params.get("all", "")).lower() in {"1", "true", "yes"}:
+                raise PolicyError(
+                    "generic API mass operation (all=1) is blocked by policy",
+                    details={"path": normalized},
+                )
+            for key in ("vmid", "newid"):
+                if not params or key not in params:
+                    continue
+                for requested in _coerce_vmids(params[key], key):
+                    if not self.file.exec.vmid_allowed(requested):
+                        raise PolicyError(
+                            f"{key} {requested} is outside exec.allowed_vmids",
+                            details={key: requested},
+                        )
         if params and _contains_secret_param(params):
             raise PolicyError("generic API parameters must not contain password/secret/token keys")
 
@@ -312,6 +337,8 @@ class Policy:
     def check_file_path(self, path: str) -> None:
         if "\x00" in path:
             raise InvalidArgument("path contains a NUL byte")
+        if ".." in PurePosixPath(path).parts:
+            raise PolicyError(f"path {path!r} must not contain '..' segments", details={"path": path})
         roots = self.file.exec.files.allowed_roots
         if not roots:
             return
@@ -398,6 +425,8 @@ def normalize_api_path(path: str) -> str | None:
         candidate = decoded
     if "%" in candidate:
         return None
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in candidate):
+        return None
     candidate = re.sub(r"/{2,}", "/", candidate)
     parts: list[str] = []
     for part in candidate.split("/"):
@@ -429,10 +458,35 @@ def _vmid_from_path(path: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _coerce_vmids(value: Any, field: str) -> list[int]:
+    if isinstance(value, bool):
+        raise InvalidArgument(f"generic API parameter {field} must be an integer")
+    if isinstance(value, int):
+        raw_values: list[Any] = [value]
+    elif isinstance(value, (list, tuple)):
+        raw_values = list(value)
+    else:
+        raise InvalidArgument(
+            f"generic API parameter {field} must be an integer or a list of integers"
+        )
+    result: list[int] = []
+    for item in raw_values:
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise InvalidArgument(
+                f"generic API parameter {field} must be an integer or a list of integers"
+            )
+        result.append(item)
+    return result
+
+
 def _contains_secret_param(value: Any) -> bool:
     if isinstance(value, dict):
         for key, item in value.items():
-            if str(key).lower() in {"password", "passwd", "secret", "token"}:
+            lowered = str(key).lower()
+            if any(
+                marker in lowered
+                for marker in ("password", "passwd", "secret", "token", "api_key", "apikey")
+            ):
                 return True
             if _contains_secret_param(item):
                 return True

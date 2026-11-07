@@ -9,9 +9,10 @@ import httpx
 import pytest
 import respx
 
+from pvehub_mcp.clients.base import quote_path
 from pvehub_mcp.clients.pbs import PBSClient
 from pvehub_mcp.clients.pve import PVEClient, parse_apidoc_js
-from pvehub_mcp.errors import AuthenticationError, NotFound, PermissionDenied
+from pvehub_mcp.errors import AuthenticationError, InvalidArgument, NotFound, PermissionDenied
 
 
 def pve_client(**kwargs: object) -> PVEClient:
@@ -126,6 +127,24 @@ async def test_get_retries_on_503() -> None:
 
 
 @respx.mock
+async def test_delete_parameters_are_query_parameters() -> None:
+    captured: dict[str, list[str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(parse_qs(request.url.query.decode()))
+        return httpx.Response(200, json={"data": None})
+
+    respx.delete("https://pve.test:8006/api2/json/nodes/pve1/qemu/100").mock(
+        side_effect=handler
+    )
+    client = pve_client()
+    await client.delete("/nodes/pve1/qemu/100", {"purge": True, "destroy-unreferenced-disks": True})
+    assert captured["purge"] == ["1"]
+    assert captured["destroy-unreferenced-disks"] == ["1"]
+    await client.aclose()
+
+
+@respx.mock
 async def test_schema_parse_and_describe(tmp_path) -> None:
     schema = [
         {
@@ -181,6 +200,13 @@ async def test_task_polling_and_log_tail() -> None:
     assert result["success"] is True
     assert "done" in result["log_tail"]
     await client.aclose()
+
+
+def test_quote_path_rejects_traversal() -> None:
+    assert quote_path("/nodes/pve1/status") == "/nodes/pve1/status"
+    for path in ("/nodes/../access", "/nodes/%2e%2e/access", "/nodes/%252e%252e/access", "/nodes/a%2fb"):
+        with pytest.raises(InvalidArgument):
+            quote_path(path)
 
 
 def test_parse_apidoc_with_prefix_and_suffix() -> None:

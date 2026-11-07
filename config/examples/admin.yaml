@@ -1,0 +1,52 @@
+# Admin policy: full tool set, including destructive actions and host shells.
+#
+# Only for trusted, single-operator deployments. Everything here still requires
+# confirm=true for destructive/exec tools, and the hard-denied generic API paths
+# below cannot be re-enabled from this file.
+read_only: false
+
+tools:
+  deny: []
+  allow: []
+
+categories:
+  deny: []
+
+generic_api:
+  # Empty = no additional path restrictions. policy.py always denies:
+  #   /access/ticket
+  #   /access/users/*/token and /access/users/*/token/*
+  #   /nodes/*/vncshell, /nodes/*/spiceshell, /nodes/*/termproxy
+  #   /nodes/*/qemu/*/monitor
+  # Those endpoints hand out session tickets or interactive consoles and would
+  # bypass the tool-level gating, so they stay blocked regardless of policy.
+  deny_paths: []
+  # DELETE is allowed through the generic bridge (default policy denies it).
+  deny_methods: []
+
+exec:
+  # Host shells are opt-in. Enable only with a dedicated SSH user/key and a
+  # known_hosts file; see README "SSH access".
+  host: true
+  lxc: true
+  vm: true
+  pbs_host: true
+  allowed_vmids:
+    - "100-199"
+  command_denylist:
+    - "rm -rf /"
+    - "mkfs*"
+    - "dd if=*"
+    - ":(){:|:&};:"
+    - "shutdown*"
+    - "reboot*"
+  timeout_seconds: 120
+  max_output_bytes: 65536
+  files:
+    allowed_roots: []
+
+safety:
+  require_confirm_for:
+    - destructive
+    - exec
+  dry_run_supported: true

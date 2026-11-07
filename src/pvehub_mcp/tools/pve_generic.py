@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..errors import ConfirmRequired
 from ..tools.common import ok, parse_upid_node
 
 
@@ -34,14 +35,22 @@ def register(hub: Any) -> None:
         instance: str | None = None,
         wait: bool = False,
         timeout: int | None = None,
+        confirm: bool = False,
     ) -> str:
         """Call an arbitrary PVE API endpoint through the token's permissions.
 
         method is GET/POST/PUT/DELETE; path must start with '/'. Parameters are sent as
         query (GET/DELETE) or form data (POST/PUT); lists become repeated keys, objects
         JSON strings. With wait=true a returned UPID is polled until completion.
+        Non-GET methods require confirm=true. Guest-agent exec/file-write endpoints are
+        permanently denied here; use the dedicated exec/file tools instead.
         """
         hub.policy.check_generic(method, path, params)
+        if method.upper() != "GET" and not confirm:
+            raise ConfirmRequired(
+                f"{method.upper()} via the generic API requires confirm=true",
+                details={"method": method.upper(), "path": path},
+            )
         client = hub.pve(instance)
         result = await client._request(method.upper(), path, params=params, data=params)
         payload: dict[str, Any] = {"method": method.upper(), "path": path, "result": result}

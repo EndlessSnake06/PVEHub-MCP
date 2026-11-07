@@ -68,6 +68,24 @@ async def test_tools_list_and_generic_call() -> None:
             assert not result.is_error
             payload = json.loads(result.content[0].text)  # type: ignore[union-attr]
             assert payload["data"]["result"]["version"] == "8.2.4"
+
+            write = await client.call_tool(
+                "pve_api_call", {"method": "POST", "path": "/nodes/pve1/qemu"}
+            )
+            payload = json.loads(write.content[0].text)  # type: ignore[union-attr]
+            assert payload["error"]["code"] == "confirm_required"
+
+            denied = await client.call_tool(
+                "pve_api_call",
+                {
+                    "method": "POST",
+                    "path": "/nodes/pve1/qemu/100/agent/exec",
+                    "params": {"command": ["id"]},
+                    "confirm": True,
+                },
+            )
+            payload = json.loads(denied.content[0].text)  # type: ignore[union-attr]
+            assert payload["error"]["code"] == "policy_denied"
     finally:
         await hub.close()
 
@@ -156,7 +174,7 @@ async def test_http_health_and_bearer_auth() -> None:
     settings = _settings(
         transport="http",
         host="127.0.0.1",
-        mcp_auth_token="test-token",
+        mcp_auth_token="test-token-0123456789",
     )
     hub = PVEHub(settings, Policy(file=PolicyFile()))
     hub.build()
@@ -179,7 +197,7 @@ async def test_http_health_and_bearer_auth() -> None:
             assert wrong.status_code == 401
 
             ok = await client.post(
-                "/mcp", json={}, headers={"Authorization": "Bearer test-token"}
+                "/mcp", json={}, headers={"Authorization": "Bearer test-token-0123456789"}
             )
             assert ok.status_code != 401
 

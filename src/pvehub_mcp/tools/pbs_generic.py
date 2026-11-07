@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..errors import ConfirmRequired
 from .common import ok, parse_upid_node
 
 
@@ -32,9 +33,18 @@ def register(hub: Any) -> None:
         instance: str | None = None,
         wait: bool = False,
         timeout: int | None = None,
+        confirm: bool = False,
     ) -> str:
-        """Call an arbitrary PBS API endpoint through the token's permissions."""
+        """Call an arbitrary PBS API endpoint through the token's permissions.
+
+        Non-GET methods require confirm=true.
+        """
         hub.policy.check_generic(method, path, params)
+        if method.upper() != "GET" and not confirm:
+            raise ConfirmRequired(
+                f"{method.upper()} via the generic API requires confirm=true",
+                details={"method": method.upper(), "path": path},
+            )
         client = hub.pbs(instance)
         result = await client._request(method.upper(), path, params=params, data=params)
         payload: dict[str, Any] = {"method": method.upper(), "path": path, "result": result}

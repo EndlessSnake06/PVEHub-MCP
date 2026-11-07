@@ -47,43 +47,50 @@ and every tool/category can be blocked through configuration.
 
 ## Phase 3 — PVE tools
 
-- [ ] Generic `pve_api_schema` + `pve_api_call` with cached `apidoc.js` index.
-- [ ] Curated cluster/node/guest/snapshot/clone/migrate/storage/backup/restore/task/firewall/HA/network/access tools.
-- [ ] Unit tests with `respx`; category and confirmation coverage.
+- [x] Generic `pve_api_schema` + `pve_api_call` with cached `apidoc.js` index.
+- [x] Curated cluster/node/guest/snapshot/clone/migrate/storage/backup/restore/task/firewall/HA/network/access tools (40).
+- [x] Unit tests with `respx`; category and confirmation coverage.
+- [x] Privilege requirements aligned with the live `apidoc.js` permission checks.
 
 ## Phase 4 — PBS tools
 
-- [ ] Generic `pbs_api_schema` + `pbs_api_call`.
-- [ ] Datastores, namespaces, snapshots (protect/forget), prune dry-run, GC, verify, jobs, remotes, tasks, health.
-- [ ] Unit tests with `respx`.
+- [x] Generic `pbs_api_schema` + `pbs_api_call`.
+- [x] Datastores, namespaces, snapshots (protect/forget), prune dry-run, GC, verify, jobs, remotes, tasks, health (20).
+- [x] Unit tests with `respx`; dry-run and confirm covered.
 
 ## Phase 5 — Shell / exec
 
-- [ ] `exec_vm` via guest agent (start, poll, stdout/stderr/exit code, timeout).
-- [ ] `exec_lxc` via SSH + `pct exec` with strict quoting; `exec_host` and `exec_pbs` opt-in.
-- [ ] File transfer (guest-agent read/write, SFTP for hosts) with size limits.
-- [ ] Exec gating: category, allowed VMIDs, confirm, output limits, audit.
-- [ ] Quoting tests with injection payloads.
+- [x] `exec_vm` via guest agent (start, poll, stdout/stderr/exit code, timeout).
+- [x] `exec_lxc` via SSH + `pct exec` with strict quoting; `exec_host` and `exec_pbs` opt-in.
+- [x] File transfer (guest-agent read/write, SFTP for hosts) with size limits.
+- [x] Exec gating: category, allowed VMIDs, confirm, output limits, audit.
+- [x] Quoting tests with injection payloads (`'; rm -rf /`, backticks, `$()`, newlines) and a fake `pct`.
 
 ## Phase 6 — Docker, CI, docs
 
-- [ ] Multi-stage Dockerfile (non-root, healthcheck, multi-arch build instructions).
-- [ ] `docker-compose.yml`, example policies.
-- [ ] Gitea Actions workflow + `Makefile` fallback.
-- [ ] README (quickstart, Mermaid diagram, tool catalog, security, client examples).
-- [ ] `docs/CONFIGURATION.md`, `docs/TOOLS.md` (generated).
+- [x] Multi-stage Dockerfile (non-root, healthcheck, multi-arch build instructions).
+- [x] `docker-compose.yml`, example policies.
+- [x] Gitea Actions workflow + `Makefile` fallback.
+- [x] README (quickstart, Mermaid diagram, tool catalog, security, client examples).
+- [x] `docs/CONFIGURATION.md`, `docs/TOOLS.md` (generated).
+- [!] Image build and CI execution not possible in this sandbox (no Docker daemon/runner);
+  static validation and local entrypoint installation were performed. See `docs/STATUS.md`.
 
 ## Phase 7 — Hardening and review
 
-- [ ] Independent review subagent: secrets in logs, policy bypasses, command injection,
+- [x] Independent review subagent: secrets in logs, policy bypasses, command injection,
   output-size DoS, TLS defaults.
-- [ ] Fixes + regression tests; `docs/SECURITY_REVIEW.md`.
-- [ ] Live integration run (read-only) only if credentials become available; otherwise documented as not run.
+- [x] Fixes + regression tests; `docs/SECURITY_REVIEW.md` (15 findings: 10 fixed, 5 accepted/justified).
+- [!] Live integration run (read-only) not run: no PVE/PBS API tokens or SSH keys were supplied.
+- [x] Post-review hardening: generic-API writes require `confirm=true`; guest-agent
+  exec/file-write hard-denied in the generic bridge; `dry_run` only honored when implemented;
+  API paths reject encoded dot segments; command/file bodies hashed in the audit log.
 
 ## Phase 8 — Release
 
-- [ ] Version `0.1.0`, `CHANGELOG.md`, git tag, image build/push (if registry available).
-- [ ] `docs/STATUS.md` with honest tested/mocked/untested matrix.
+- [x] Version `0.1.0`, `CHANGELOG.md`, git tag, local wheel build; image build/push not possible
+  without a Docker daemon/registry.
+- [x] `docs/STATUS.md` with honest tested/mocked/untested matrix.
 
 ## Working agreement
 

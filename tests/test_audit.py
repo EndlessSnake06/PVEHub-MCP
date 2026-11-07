@@ -9,6 +9,19 @@ import pytest
 from pvehub_mcp.audit import AuditLogger, redact_value
 
 
+def test_redact_command_and_content_bodies() -> None:
+    redacted = redact_value(
+        {
+            "command": "export API_TOKEN=supersecret; echo ok",
+            "content_base64": "c2VjcmV0",
+        }
+    )
+    assert isinstance(redacted["command"], dict)
+    assert "supersecret" not in redacted["command"]["preview"]
+    assert redacted["command"]["length"] == len("export API_TOKEN=supersecret; echo ok")
+    assert "c2VjcmV0" not in str(redacted["content_base64"])
+
+
 def test_redact_secret_keys_and_values() -> None:
     payload = {
         "password": "hunter2",

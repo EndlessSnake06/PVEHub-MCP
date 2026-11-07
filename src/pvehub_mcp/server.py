@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import inspect
 import json
 import logging
 import secrets
@@ -19,13 +20,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from .audit import AuditLogger
+from .audit import AuditLogger, redact_value
 from .capabilities import CapabilityManager, Privilege
 from .clients.pbs import PBSClient
 from .clients.pve import PVEClient
 from .clients.ssh import SSHClientPool
 from .config import Settings
-from .errors import PolicyError, PVEHubError
+from .errors import InvalidArgument, NotFound, PolicyError, PVEHubError
 from .policy import Category, Policy
 from .tools.common import dumps, fail
 
@@ -145,7 +146,7 @@ class PVEHub:
                 "Shell tools require SSH (LXC/host/PBS) or a running QEMU guest agent (VMs)."
             ),
             lifespan=self._lifespan,
-            log_level=self.settings.log_level,  # type: ignore[arg-type]
+            log_level=self.settings.log_level,
         )
         return self._mcp
 
@@ -170,11 +171,11 @@ class PVEHub:
         self, kind: str, instance: str | None, clients: dict[str, Any]
     ) -> str:
         if not clients:
-            raise PVEHubError(f"no {kind.upper()} instance configured")
+            raise InvalidArgument(f"no {kind.upper()} instance configured")
         if instance is None:
             return next(iter(clients))
         if instance not in clients:
-            raise PVEHubError(
+            raise InvalidArgument(
                 f"unknown {kind.upper()} instance {instance!r}; configured: {', '.join(clients)}"
             )
         return instance
@@ -186,7 +187,7 @@ class PVEHub:
             for resource in resources:
                 if isinstance(resource, dict) and resource.get("vmid") == vmid:
                     return resource
-        raise PVEHubError(f"guest {vmid} not found in PVE instance {client.name}")
+        raise NotFound(f"guest {vmid} not found in PVE instance {client.name}")
 
     async def resolve_node(self, node: str, instance: str | None = None) -> dict[str, Any]:
         client = self.pve(instance)
@@ -195,7 +196,7 @@ class PVEHub:
             for item in nodes:
                 if isinstance(item, dict) and item.get("node") == node:
                     return item
-        raise PVEHubError(f"node {node!r} not found in PVE instance {client.name}")
+        raise NotFound(f"node {node!r} not found in PVE instance {client.name}")
 
     # -- registration ------------------------------------------------------
     def tool(
@@ -294,6 +295,10 @@ class PVEHub:
 
     def _shell_available(self, shell: str) -> tuple[bool, str]:
         ssh_ready = bool(self.settings.ssh.nodes or self.settings.ssh.pbs)
+        if ssh_ready and shell in {"host", "lxc", "pbs", "files"}:
+            missing = self.settings.ssh.missing_prerequisites()
+            if missing:
+                return False, "SSH prerequisites missing: " + "; ".join(missing)
         if shell == "host":
             if not self.policy.file.exec.host:
                 return False, "exec.host is disabled"
@@ -318,6 +323,10 @@ class PVEHub:
             if self.settings.ssh.pbs is None:
                 return False, "no SSH target configured for PBS (ssh.pbs)"
             return True, ""
+        if shell == "guest":
+            if not self.pve_clients:
+                return False, "no PVE instance configured"
+            return True, ""
         if shell == "files":
             if not ssh_ready:
                 return False, "no SSH target configured"
@@ -340,7 +349,10 @@ class PVEHub:
             target = _target(kwargs)
             status = "ok"
             try:
-                self.policy.check_call(name, category, kwargs)
+                supports_dry_run = "dry_run" in inspect.signature(fn).parameters
+                self.policy.check_call(
+                    name, category, kwargs, dry_run_supported=supports_dry_run
+                )
                 if pve:
                     pve_client = self.pve(instance)
                     self.capabilities.check_pve(pve_client.name, pve, kwargs)  # type: ignore[union-attr]
@@ -504,16 +516,45 @@ class BearerAuthMiddleware:
         await self.app(scope, receive, send)
 
 
-def build_http_app(hub: PVEHub) -> Starlette:
-    transport_security = None
-    if hub.settings.allowed_hosts:
-        transport_security = TransportSecuritySettings(
+def _transport_security(settings: Settings) -> TransportSecuritySettings:
+    """Build DNS-rebinding settings.
+
+    A loopback-only server is the default and needs no bearer token, so it must
+    still reject foreign ``Host`` headers (a browser can be tricked into talking
+    to 127.0.0.1 via DNS rebinding).  For non-loopback binds the operator has to
+    list the hostnames clients use; an empty list keeps the old behaviour and
+    logs a warning because the bearer token is the only remaining control.
+    """
+
+    if settings.allowed_hosts:
+        return TransportSecuritySettings(
             enable_dns_rebinding_protection=True,
-            allowed_hosts=hub.settings.allowed_hosts,
-            allowed_origins=hub.settings.allowed_hosts,
+            allowed_hosts=list(settings.allowed_hosts),
+            allowed_origins=list(settings.allowed_hosts),
         )
-    else:
-        transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    if settings.host in {"127.0.0.1", "::1", "localhost"}:
+        hosts = [
+            "127.0.0.1",
+            "127.0.0.1:*",
+            "localhost",
+            "localhost:*",
+            "[::1]",
+            "[::1]:*",
+        ]
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=hosts,
+            allowed_origins=hosts,
+        )
+    logger.warning(
+        "DNS-rebinding protection is disabled (allowed_hosts is empty); "
+        "set PVEHUB_ALLOWED_HOSTS to the hostnames clients use"
+    )
+    return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+
+def build_http_app(hub: PVEHub) -> Starlette:
+    transport_security = _transport_security(hub.settings)
     app = hub.mcp.streamable_http_app(
         streamable_http_path="/mcp",
         stateless_http=False,
@@ -538,7 +579,8 @@ def _target(kwargs: dict[str, Any]) -> str | None:
     for key in ("vmid", "node", "store", "name", "path", "command"):
         value = kwargs.get(key)
         if value is not None:
-            return f"{key}={value}"
+            redacted = redact_value(f"{key}={value}")
+            return redacted if isinstance(redacted, str) else str(redacted)
     return None
 
 

@@ -1,0 +1,55 @@
+# Operator policy: day-to-day VM/LXC work, no destructive actions, no host shell.
+#
+# - destructive tools (delete, purge, rollback, stop of storage, ...) are not registered
+# - LXC and QEMU exec are enabled, but only for VMIDs in exec.allowed_vmids and only
+#   with confirm=true
+# - PVE host shell and PBS host shell stay disabled
+# - the generic API bridge may POST/PUT/PATCH, but DELETE is denied by policy
+read_only: false
+
+tools:
+  deny: []
+  allow: []
+
+categories:
+  deny:
+    - destructive
+
+generic_api:
+  deny_paths:
+    - /access/ticket
+    - /access/users/*/token/*
+    - /access/users/*/token
+    - /nodes/*/vncshell
+    - /nodes/*/spiceshell
+    - /nodes/*/termproxy
+    - /nodes/*/qemu/*/monitor
+  deny_methods:
+    - DELETE
+
+exec:
+  host: false
+  lxc: true
+  vm: true
+  pbs_host: false
+  allowed_vmids:
+    - "100-199"
+  command_denylist:
+    - "rm -rf /"
+    - "mkfs*"
+    - "dd if=*"
+    - ":(){:|:&};:"
+    - "shutdown*"
+    - "reboot*"
+  timeout_seconds: 60
+  max_output_bytes: 65536
+  files:
+    # Restrict read/write/pull/push to these prefixes. Empty = no restriction.
+    allowed_roots: []
+
+safety:
+  # destructive is denied above; keeping it here is defence in depth.
+  require_confirm_for:
+    - destructive
+    - exec
+  dry_run_supported: true

@@ -175,12 +175,20 @@ class SSHSettings(BaseModel):
     def missing_prerequisites(self) -> list[str]:
         missing: list[str] = []
         if not self.nodes and self.pbs is None:
-            missing.append("ssh.nodes or ssh.pbs")
-        if not Path(self.key_path).exists():
-            missing.append(f"ssh key not found: {self.key_path}")
-        if self.strict_host_key and not Path(self.known_hosts).exists():
-            missing.append(f"known_hosts not found: {self.known_hosts}")
-        return missing
+            return ["ssh.nodes or ssh.pbs"]
+        targets: list[SSHTarget] = []
+        for name in self.nodes:
+            resolved = self.node(name)
+            if resolved is not None:
+                targets.append(resolved)
+        if self.pbs is not None:
+            targets.append(self.pbs)
+        for target in targets:
+            if not Path(target.key_path).exists():
+                missing.append(f"ssh key not found: {target.key_path}")
+            if target.strict_host_key and not Path(target.known_hosts).exists():
+                missing.append(f"known_hosts not found: {target.known_hosts}")
+        return sorted(set(missing))
 
 
 class Settings(BaseModel):
@@ -205,8 +213,15 @@ class Settings(BaseModel):
     capabilities_refresh_seconds: int = 300
     capabilities_fail_open: bool = True
     wait_default: bool = True
-    log_level: str = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     allow_insecure_http: bool = False
+
+    @field_validator("mcp_auth_token")
+    @classmethod
+    def _token_not_blank(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and not value.get_secret_value().strip():
+            raise ValueError("mcp_auth_token must not be empty")
+        return value
 
     @model_validator(mode="after")
     def _validate(self) -> Settings:
@@ -219,6 +234,12 @@ class Settings(BaseModel):
                     f"instance {instance.name!r} uses http; set allow_insecure_http=true "
                     "only for isolated test environments"
                 )
+        if self.mcp_auth_token is not None:
+            token = self.mcp_auth_token.get_secret_value()
+            if not token.strip():
+                raise ValueError("mcp_auth_token must not be empty")
+            if len(token) < 16:
+                raise ValueError("mcp_auth_token must be at least 16 characters")
         if (
             self.transport == "http"
             and not _is_loopback(self.host)

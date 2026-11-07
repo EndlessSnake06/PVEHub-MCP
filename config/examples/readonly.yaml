@@ -1,0 +1,63 @@
+# Read-only policy.
+#
+# Use for monitoring, dashboards and first-time evaluation: every tool that
+# changes state is removed from the MCP tool list at startup, and the generic
+# API bridge is limited to GET. No SSH target is used.
+#
+# Schema: src/pvehub_mcp/policy.py (extra keys are rejected at startup).
+read_only: true
+
+tools:
+  deny: []
+  allow: []
+
+categories:
+  deny:
+    - lifecycle
+    - write
+    - destructive
+    - exec
+
+generic_api:
+  # These paths are also hard-denied in policy.py (HARD_DENY_PATHS); listing
+  # them here documents the intent and keeps the effective policy auditable.
+  deny_paths:
+    - /access/ticket
+    - /access/users/*/token/*
+    - /access/users/*/token
+    - /nodes/*/vncshell
+    - /nodes/*/spiceshell
+    - /nodes/*/termproxy
+    - /nodes/*/qemu/*/monitor
+  # read_only already restricts the generic bridge to GET; keep it explicit.
+  deny_methods:
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+
+exec:
+  host: false
+  lxc: false
+  vm: false
+  pbs_host: false
+  allowed_vmids:
+    - "100-199"
+  command_denylist:
+    - "rm -rf /"
+    - "mkfs*"
+    - "dd if=*"
+    - ":(){:|:&};:"
+    - "shutdown*"
+    - "reboot*"
+  timeout_seconds: 60
+  max_output_bytes: 65536
+  files:
+    # Empty list = no path restriction (only relevant when exec/file tools exist).
+    allowed_roots: []
+
+safety:
+  require_confirm_for:
+    - destructive
+    - exec
+  dry_run_supported: true

@@ -39,6 +39,13 @@ def test_confirm_required_and_dry_run_bypass() -> None:
         policy.check_call("pve_guest_delete", "destructive", {"vmid": 100})
     policy.check_call("pve_guest_delete", "destructive", {"vmid": 100, "confirm": True})
     policy.check_call("pve_guest_delete", "destructive", {"vmid": 100, "dry_run": True})
+    with pytest.raises(ConfirmRequired):
+        policy.check_call(
+            "pve_guest_delete",
+            "destructive",
+            {"vmid": 100, "dry_run": True},
+            dry_run_supported=False,
+        )
 
 
 def test_allowed_vmids() -> None:
@@ -67,6 +74,8 @@ def test_generic_hard_denied_paths() -> None:
         "/nodes/pve1/vncshell",
         "/nodes/pve1/spiceshell",
         "/nodes/pve1/termproxy",
+        "/nodes/pve1/qemu/100/agent/exec",
+        "/nodes/pve1/qemu/100/agent/file-write",
     ):
         with pytest.raises(PolicyError):
             policy.check_generic("POST", path)
@@ -96,6 +105,24 @@ def test_generic_vmid_gate() -> None:
     policy = _policy(exec={"allowed_vmids": ["100-110"]})
     with pytest.raises(PolicyError):
         policy.check_generic("POST", "/nodes/pve1/qemu/999/status/start")
+
+
+def test_generic_vmid_parameter_gate() -> None:
+    policy = _policy(exec={"allowed_vmids": ["100-110"]})
+    policy.check_generic("POST", "/nodes/pve1/qemu", {"vmid": 105})
+    with pytest.raises(PolicyError):
+        policy.check_generic("POST", "/nodes/pve1/qemu", {"vmid": 500})
+    with pytest.raises(PolicyError):
+        policy.check_generic(
+            "POST", "/nodes/pve1/qemu/105/clone", {"newid": 500}
+        )
+    with pytest.raises(InvalidArgument):
+        policy.check_generic("POST", "/nodes/pve1/qemu", {"vmid": "abc"})
+    policy.check_generic("POST", "/nodes/pve1/vzdump", {"vmid": [105, 106]})
+    with pytest.raises(PolicyError):
+        policy.check_generic("POST", "/nodes/pve1/vzdump", {"vmid": [105, 500]})
+    with pytest.raises(PolicyError):
+        policy.check_generic("POST", "/nodes/pve1/vzdump", {"all": 1})
 
 
 def test_command_denylist() -> None:
