@@ -182,3 +182,37 @@ unaffected (no listener). `/health` remains unauthenticated (liveness for orches
 it exposes no control data). Per-client attribution (named tokens, `client` field in the
 audit log) and OAuth2 client-credentials against Pocket ID are out of scope for this
 fix and tracked as follow-up work in issue #16.
+
+## D021 — Health: liveness (`/health`, minimal) vs readiness (`/ready`, authenticated) (issues #23, #24)
+
+**Context:** In 0.1.0, `GET /health` answered 200 with the full health body (`status`,
+`version`, `transport`, tool count) — unauthenticated. Two problems: (a) the status code
+was always 200, so Docker/compose healthchecks and external monitors never saw a
+`degraded` backend (bad or revoked PVE/PBS token); (b) the unauthenticated endpoint
+leaked the exact version (CVE matching against a server whose token can run `exec_host`
+and `guest_delete`), the tool count (policy shape) and the degraded signal to any LAN
+client. The security review (F-13) had accepted the leak as low value; with
+`PVEHUB_CAPABILITIES_FAIL_OPEN=true` (the default) the degraded state is exactly when
+that information is most useful to an attacker.
+
+**Decision:** Split the concerns. `GET /health` is liveness: `{"status": "ok"}`, always
+200 while the process runs, no version or tool count, unauthenticated (Docker healthchecks
+and external liveness monitors need it without credentials; the port stays LAN-only per
+the README). `GET /ready` is readiness: the full `hub.health()` body (the same method
+that feeds the authenticated `pvehub_health` MCP tool — unchanged), HTTP 200 while
+`status == "ok"`, 503 otherwise. The bearer middleware protects `/ready` via an
+exact-path list next to the `/mcp` prefix; the single-token comparison is unchanged.
+In loopback development mode without a token the middleware is not installed, so `/ready`
+is open there; non-loopback binds without a token are already refused by config
+validation. The Dockerfile and docker-compose healthchecks probe `/ready` with the bearer
+from the container environment, so a dead or degraded backend turns the container
+`unhealthy`. The CI compose smoke asserts `/health` 200, `/ready` with bearer in
+(200, 503) — 503 is the expected steady state in CI, where the PVE/PBS URLs are
+unreachable placeholders — and `/ready` without bearer 401.
+
+**Consequences:** Operators who parsed `/health` for version or tool count must use
+`/ready` (authenticated) or the `pvehub_health` tool. External readiness monitors must
+use `/ready` with the token; pure process-liveness monitors may use `/health`. stdio
+deployments remain `unhealthy` (no HTTP listener) — expected and documented. This
+supersedes the `/health` remark in D018 and resolves F-13 of the security review (see
+the 0.1.1 addendum in `docs/SECURITY_REVIEW.md`).

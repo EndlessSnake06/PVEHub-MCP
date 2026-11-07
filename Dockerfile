@@ -73,10 +73,15 @@ USER 10001:10001
 
 EXPOSE 8080
 
-# /health is unauthenticated and returns status, version and tool count only.
+# Liveness (/health) is unauthenticated and minimal: it only reports that the
+# process is running ({"status": "ok"}), never version or tool count.
+# Readiness (/ready) is authenticated (same bearer as /mcp) and returns 503
+# while any capability discovery is degraded; the container healthcheck
+# probes /ready with the token from the container environment, so a dead or
+# degraded backend turns the container "unhealthy" (issues #23, #24).
 # stdio deployments have no HTTP listener, so this check stays "unhealthy"
 # there — that is expected and harmless (see docs/CONFIGURATION.md).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD ["python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).status == 200 else 1)"]
+    CMD ["python", "-c", "import os,sys,urllib.request as u; t=os.environ.get('PVEHUB_MCP_AUTH_TOKEN',''); h={'Authorization':'Bearer '+t} if t else {}; sys.exit(0 if u.urlopen(u.Request('http://127.0.0.1:8080/ready', headers=h), timeout=4).status==200 else 1)"]
 
 ENTRYPOINT ["pvehub-mcp"]

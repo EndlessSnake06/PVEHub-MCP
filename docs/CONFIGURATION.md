@@ -76,7 +76,7 @@ PBS instance.
 | `PVEHUB_TRANSPORT` | `http` | `http` (Streamable HTTP at `/mcp`) or `stdio` | no |
 | `PVEHUB_HOST` | `127.0.0.1` | Bind address for HTTP | no |
 | `PVEHUB_PORT` | `8080` | Bind port for HTTP | no |
-| `PVEHUB_MCP_AUTH_TOKEN` | unset | Bearer token checked on every `/mcp` request; **required for the http transport** (see `PVEHUB_MCP_AUTH_REQUIRED`) | **yes** |
+| `PVEHUB_MCP_AUTH_TOKEN` | unset | Bearer token checked on every `/mcp` request and on `GET /ready`; **required for the http transport** (see `PVEHUB_MCP_AUTH_REQUIRED`) | **yes** |
 | `PVEHUB_MCP_AUTH_REQUIRED` | `true` | When `true` (default), the http transport refuses to start without `PVEHUB_MCP_AUTH_TOKEN`. `false` allows an unauthenticated `/mcp` on loopback binds only (development); non-loopback binds stay refused | no |
 | `PVEHUB_ALLOWED_HOSTS` | empty | Comma-separated `Host`/`Origin` allowlist; enables DNS-rebinding protection. Empty disables that protection | no |
 | `PVEHUB_POLICY_FILE` | `/config/policy.yaml` | Path to the policy YAML | no |
@@ -225,7 +225,7 @@ allow_insecure_http: false
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `transport` | `http` \| `stdio` | `http` | `http` serves `/mcp` and `/health` |
+| `transport` | `http` \| `stdio` | `http` | `http` serves `/mcp`, `/health` (liveness) and `/ready` (authenticated readiness) |
 | `host` | string | `127.0.0.1` | see `mcp_auth_required`/`mcp_auth_token` |
 | `port` | int | `8080` | |
 | `mcp_auth_token` | string (secret) | unset | constant-time bearer check on `/mcp` |
@@ -458,9 +458,20 @@ maps the token's effective privileges onto the declared tool requirements
 - The root filesystem is read-only in `docker-compose.yml`; `/tmp` is a tmpfs.
 - `PVEHUB_CONFIG_FILE=/config/config.yaml` is baked into the image, so a missing
   `config/config.yaml` simply means "environment only".
-- `/health` is unauthenticated and returns `status`, `version`, `transport` and the
-  tool count. `status` is `degraded` when capability discovery failed; the endpoint
-  still answers `200` so orchestrators do not restart a working server.
+- Health endpoints (see D021 in `docs/DECISIONS.md`):
+  - `GET /health` — liveness, unauthenticated, always `200` while the process runs; the
+    body is exactly `{"status": "ok"}`. No version, no transport, no tool count, no
+    backend state.
+  - `GET /ready` — readiness, **authenticated** (same bearer as `/mcp`; the middleware
+    protects the exact path in addition to the `/mcp` prefix). Full health body
+    (`status`, `version`, `transport`, `tools`, per-instance capability state); `200`
+    while `status == "ok"`, `503` while any capability discovery is degraded. In loopback
+    development mode without a token the middleware is not installed and the endpoint is
+    open there; non-loopback binds without a token are refused by config validation.
+  - The Dockerfile and `docker-compose.yml` healthchecks probe `/ready` with the bearer
+    from the container environment, so a dead or degraded backend marks the container
+    `unhealthy`. External readiness monitors (Uptime Kuma, Beszel, ...) must use `/ready`
+    with the token; pure process-liveness monitors may use `/health`.
 - In `stdio` transport there is no HTTP listener; the image healthcheck consequently
   reports `unhealthy`. Use stdio only via `docker run -i`, where that is harmless.
 - CLI flags override environment values: `--transport`, `--host`, `--port`,

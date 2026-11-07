@@ -106,9 +106,30 @@ jobs:
       - name: Compose smoke
         if: steps.docker.outputs.available == 'true'
         run: |
+          # Pass the bearer explicitly to the exec'd probe so the smoke does
+          # not depend on the container's runtime environment.
+          token=$(sed -n 's/^PVEHUB_MCP_AUTH_TOKEN=//p' .env)
           docker compose up -d --build
           for attempt in $(seq 1 90); do
-            if docker compose exec -T pvehub-mcp python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).status == 200 else 1)"; then
+            # Readiness probe with the bearer: 200 = healthy, 503 = up but
+            # degraded — in CI the PVE/PBS URLs are unreachable placeholders,
+            # so 503 is the expected steady state here and still proves the
+            # app answers. Liveness (/health) and auth (401 without bearer)
+            # are asserted as well. The python block must start at column 0
+            # of the script (shell-quoted multi-line python).
+            if docker compose exec -T -e PVEHUB_MCP_AUTH_TOKEN="$token" pvehub-mcp python -c "
+          import os,sys,urllib.request as u,urllib.error
+          t=os.environ.get('PVEHUB_MCP_AUTH_TOKEN','')
+          h={'Authorization':'Bearer '+t} if t else {}
+          def status(path,headers):
+              try:
+                  return u.urlopen(u.Request(path,headers=headers),timeout=4).status
+              except u.HTTPError as e:
+                  return e.code
+          assert status('http://127.0.0.1:8080/health',{})==200
+          assert status('http://127.0.0.1:8080/ready',h) in (200,503)
+          assert status('http://127.0.0.1:8080/ready',{})==401
+            "; then
               docker compose ps
               exit 0
             fi

@@ -12,6 +12,17 @@ versioning: Semantic Versioning.
   unauthenticated `/mcp` (issue #16). `PVEHUB_MCP_AUTH_REQUIRED=false` (new, default
   `true`) is the explicit opt-out for loopback development setups; a warning is logged
   at startup and non-loopback binds without a token stay refused.
+- `GET /health` is now a minimal liveness probe: the body is exactly `{"status": "ok"}`
+  (always `200` while the process runs) and no longer exposes the version, transport or
+  tool count (issue #24).
+
+### Security
+
+- New authenticated `GET /ready` readiness endpoint (same bearer as `/mcp`): full health
+  body, HTTP `503` while any capability discovery is degraded. The Dockerfile and
+  docker-compose healthchecks now probe `/ready` with the token from the container
+  environment, so a dead or degraded backend marks the container `unhealthy` instead of
+  staying `healthy` (issues #23, #24).
 
 ## [0.1.0] — 2026-11-07
 

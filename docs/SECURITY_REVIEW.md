@@ -102,3 +102,15 @@ Post-merge integration gate after the follow-up hardening (generic-API confirm, 
 guest-agent exec/file-write, dry-run signature check, encoded-dot-segment rejection):
 `250 passed, 2 skipped`, `ruff` clean, `mypy` clean (39 source files). The review baseline
 and the evidence above refer to `fix/security-review`; the merged tree is `integration/v0.1.0`.
+
+## Addendum — 0.1.1 (2026-11-07)
+
+- **F-13** (Low, previously accepted-risk) is resolved by design change, not accepted:
+  `GET /health` no longer exposes `status`, `version`, `transport` or the tool count; it
+  is a minimal liveness probe (`{"status": "ok"}`, always 200 while the process runs).
+  The full health body moved to the authenticated `GET /ready` endpoint (503 while
+  degraded), which the container healthchecks and the CI compose smoke now use (issues
+  #23, #24; `docs/DECISIONS.md` D021). Regression coverage: the health-split tests in
+  `tests/test_server.py` (exact `/health` body, `/ready` 401/200/503, dev-mode open).
+- The per-client attribution follow-up of issue #16 (named MCP tokens, `client` field in
+  the audit log) shipped in the same 0.1.1 release (D019, `PVEHUB_MCP_AUTH_TOKENS`).

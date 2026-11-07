@@ -9,7 +9,7 @@ MCP client (Claude, Hermes, Open WebUI, ...)
 ┌──────────────────────────────────────────────────────────────┐
 │ pvehub-mcp (single container / process)                      │
 │                                                              │
-│  server.py       MCPServer, transport, auth, /health         │
+│  server.py       MCPServer, transport, auth, /health, /ready │
 │  policy.py       categories, allow/deny, generic API rules   │
 │  capabilities.py token permissions → tool availability       │
 │  audit.py        JSONL audit trail + redaction               │
@@ -107,8 +107,13 @@ validated at startup; unknown keys fail loudly (`extra="forbid"`).
 - **Streamable HTTP** (default in the container): `0.0.0.0:8080/mcp`, bearer token required.
   Refuses to bind a non-loopback address without `PVEHUB_MCP_AUTH_TOKEN`.
 - **stdio**: `PVEHUB_TRANSPORT=stdio`; no network listener, no bearer token needed.
-- `/health`: unauthenticated liveness endpoint returning status, version and last capability
-  discovery result (no secrets, no detailed inventory).
+- `/health`: unauthenticated **liveness** endpoint; always `200` while the process runs,
+  body is exactly `{"status": "ok"}` — no version, no tool count, no backend state.
+- `/ready`: **readiness** endpoint, authenticated with the same bearer as `/mcp` (the
+  middleware protects the exact path in addition to the `/mcp` prefix). Full health body
+  (`status`, `version`, `transport`, `tools`, per-instance capability state); `200` while
+  healthy, `503` while any capability discovery is degraded. The container and CI
+  healthchecks probe `/ready` with the token from the container environment (D021).
 
 ## Module layout
 
@@ -155,7 +160,7 @@ src/pvehub_mcp/
 
 | Failure | Behavior |
 |---|---|
-| PVE/PBS unreachable at startup | server starts; capabilities marked `unknown`; tools registered if `capabilities.fail_open`; `/health` reports degraded |
+| PVE/PBS unreachable at startup | server starts; capabilities marked `unknown`; tools registered if `capabilities.fail_open`; `GET /ready` reports `degraded` with HTTP `503` (liveness `/health` stays `200`) |
 | Permission discovery 401/403 | treated as "no permissions"; no privileged tools registered |
 | API 403 at call time | `permission_denied` with required privilege and path |
 | Task timeout (`wait=true`) | returns UPID + `timed_out: true`; caller can poll `*_task_status` |

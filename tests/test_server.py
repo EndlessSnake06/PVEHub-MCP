@@ -184,22 +184,79 @@ async def test_http_health_and_bearer_auth() -> None:
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=transport, base_url="http://test") as client,
     ):
+            # Liveness: minimal body, no version or tool count.
             health = await client.get("/health")
             assert health.status_code == 200
-            assert health.json()["status"] == "ok"
+            assert health.json() == {"status": "ok"}
+            assert "version" not in health.json()
+            assert "tools" not in health.json()
 
-            unauthorized = await client.post("/mcp", json={})
+            # Readiness: authenticated, full body, 200 while healthy.
+            unauthorized = await client.get("/ready")
             assert unauthorized.status_code == 401
+            assert unauthorized.headers["WWW-Authenticate"] == "Bearer"
 
-            wrong = await client.post(
-                "/mcp", json={}, headers={"Authorization": "Bearer wrong"}
-            )
+            wrong = await client.get("/ready", headers={"Authorization": "Bearer wrong"})
             assert wrong.status_code == 401
 
-            ok = await client.post(
+            ready = await client.get(
+                "/ready", headers={"Authorization": "Bearer test-token-0123456789"}
+            )
+            assert ready.status_code == 200
+            ready_body = ready.json()
+            assert ready_body["status"] == "ok"
+            assert ready_body["version"] == "0.1.0"
+            assert "tools" in ready_body
+
+            # MCP endpoint: bearer auth unchanged.
+            mcp_unauthorized = await client.post("/mcp", json={})
+            assert mcp_unauthorized.status_code == 401
+
+            mcp_wrong = await client.post(
+                "/mcp", json={}, headers={"Authorization": "Bearer wrong"}
+            )
+            assert mcp_wrong.status_code == 401
+
+            mcp_ok = await client.post(
                 "/mcp", json={}, headers={"Authorization": "Bearer test-token-0123456789"}
             )
-            assert ok.status_code != 401
+            assert mcp_ok.status_code != 401
+
+
+@respx.mock
+async def test_http_ready_degraded_returns_503() -> None:
+    # Permission discovery fails (500 from the API) -> capability snapshot
+    # carries an error -> hub.health() reports "degraded".
+    respx.get("https://pve.test:8006/api2/json/access/permissions").mock(
+        return_value=httpx.Response(500, json={"errors": {"internal": "boom"}})
+    )
+    settings = _settings(
+        transport="http",
+        host="127.0.0.1",
+        mcp_auth_token="test-token-0123456789",
+    )
+    hub = PVEHub(settings, Policy(file=PolicyFile()))
+    hub.build()
+    app = build_http_app(hub)
+    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+    ):
+            ready = await client.get(
+                "/ready", headers={"Authorization": "Bearer test-token-0123456789"}
+            )
+            assert ready.status_code == 503
+            body = ready.json()
+            assert body["status"] == "degraded"
+            assert "version" in body
+            assert "tools" in body
+
+            # Liveness stays 200 and minimal: the process is up, the backend
+            # problem is reported by /ready (503) and the pvehub_health tool.
+            health = await client.get("/health")
+            assert health.status_code == 200
+            assert health.json() == {"status": "ok"}
 
 
 def test_non_loopback_requires_token_at_settings_level() -> None:
@@ -233,6 +290,13 @@ async def test_http_loopback_opt_out_serves_unauthenticated() -> None:
     ):
         health = await client.get("/health")
         assert health.status_code == 200
+        assert health.json() == {"status": "ok"}
+
+        # No token configured -> the bearer middleware is not installed, so
+        # /ready is open on this loopback development bind.
+        ready = await client.get("/ready")
+        assert ready.status_code == 200
+        assert ready.json()["status"] == "ok"
 
         open_request = await client.post("/mcp", json={})
         assert open_request.status_code != 401

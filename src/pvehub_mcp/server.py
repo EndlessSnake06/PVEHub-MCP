@@ -491,15 +491,30 @@ class PVEHub:
 
 
 class BearerAuthMiddleware:
-    """Constant-time bearer check for the MCP endpoint."""
+    """Constant-time bearer check for the MCP endpoint and the readiness probe.
 
-    def __init__(self, app: Any, token: str, protected_prefix: str = "/mcp") -> None:
+    The ``/mcp`` prefix is owned by the MCP SDK app; additional exact paths
+    (the ``/ready`` readiness endpoint) are listed in ``protected_paths``.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        token: str,
+        protected_prefix: str = "/mcp",
+        protected_paths: frozenset[str] = frozenset(),
+    ) -> None:
         self.app = app
         self.token = token
         self.protected_prefix = protected_prefix
+        self.protected_paths = protected_paths
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
-        if scope.get("type") != "http" or not scope.get("path", "").startswith(self.protected_prefix):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if not (path.startswith(self.protected_prefix) or path in self.protected_paths):
             await self.app(scope, receive, send)
             return
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
@@ -563,14 +578,24 @@ def build_http_app(hub: PVEHub) -> Starlette:
     )
 
     async def health(_request: Request) -> JSONResponse:
-        return JSONResponse(hub.health())
+        # Liveness only: always 200 while the process runs. Backend health is
+        # reported by the authenticated /ready endpoint and the pvehub_health
+        # tool; /health deliberately exposes no version or tool count.
+        return JSONResponse({"status": "ok"})
 
+    async def ready(_request: Request) -> JSONResponse:
+        body = hub.health()
+        status_code = 200 if body.get("status") == "ok" else 503
+        return JSONResponse(body, status_code=status_code)
+
+    app.router.routes.insert(0, Route("/ready", ready, methods=["GET"]))
     app.router.routes.insert(0, Route("/health", health, methods=["GET"]))
     if hub.settings.mcp_auth_token is not None:
         app.add_middleware(
             BearerAuthMiddleware,
             token=hub.settings.mcp_auth_token.get_secret_value(),
             protected_prefix="/mcp",
+            protected_paths=frozenset({"/ready"}),
         )
     else:
         logger.warning(
