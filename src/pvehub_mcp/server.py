@@ -6,7 +6,6 @@ import functools
 import inspect
 import json
 import logging
-import secrets
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -22,6 +21,7 @@ from starlette.routing import Route
 
 from .audit import AuditLogger, redact_value
 from .capabilities import CapabilityManager, Privilege
+from .clientid import LEGACY, client_context, current_client, resolve_client
 from .clients.pbs import PBSClient
 from .clients.pve import PVEClient
 from .clients.ssh import SSHClientPool
@@ -62,6 +62,8 @@ class PVEHub:
             settings.audit_log,
             include_results=settings.audit_include_results,
             max_string=max(2048, settings.max_output_bytes // 8),
+            max_bytes=settings.audit_max_bytes,
+            keep=settings.audit_keep,
         )
         self.ssh = SSHClientPool(settings.ssh)
         self.pve_clients: dict[str, PVEClient] = {}
@@ -347,7 +349,12 @@ class PVEHub:
             started = __import__("time").monotonic()
             instance = kwargs.get("instance")
             target = _target(kwargs)
+            # D019 (issue #21): the middleware set the client name for http
+            # requests; stdio/loopback dev setups resolve to "unknown".
+            client = current_client()
             status = "ok"
+            error: dict[str, Any] | None = None
+            response: str | None = None
             try:
                 supports_dry_run = "dry_run" in inspect.signature(fn).parameters
                 self.policy.check_call(
@@ -365,17 +372,24 @@ class PVEHub:
                 text = result if isinstance(result, str) else dumps(result)
                 if len(text.encode("utf-8")) > self.settings.max_output_bytes:
                     text = _shrink(text, self.settings.max_output_bytes)
+                response = text
                 return text
             except PolicyError as exc:
                 status = "denied"
-                return fail(exc.code, exc.message, **exc.details)
+                error = {"code": exc.code, "message": exc.message}
+                response = fail(exc.code, exc.message, **exc.details)
+                return response
             except PVEHubError as exc:
                 status = "error"
-                return fail(exc.code, exc.message, **exc.details)
+                error = {"code": exc.code, "message": exc.message}
+                response = fail(exc.code, exc.message, **exc.details)
+                return response
             except Exception as exc:
                 logger.exception("tool %s failed", name)
                 status = "error"
-                return fail("internal_error", f"{exc.__class__.__name__}: {exc}")
+                error = {"code": "internal_error", "message": f"{exc.__class__.__name__}: {exc}"}
+                response = fail("internal_error", f"{exc.__class__.__name__}: {exc}")
+                return response
             finally:
                 duration = int((__import__("time").monotonic() - started) * 1000)
                 await self.audit.write(
@@ -386,6 +400,10 @@ class PVEHub:
                     target=target,
                     params=kwargs,
                     duration_ms=duration,
+                    output_bytes=len(response.encode("utf-8")) if response is not None else None,
+                    error=error,
+                    result=response,
+                    client=client,
                 )
 
         return wrapper
@@ -473,7 +491,16 @@ class PVEHub:
             },
             "capabilities": self.capabilities.report() if self.capabilities else None,
             "shell": shell,
-            "audit": {"enabled": self.audit.enabled, "path": str(self.audit.path) if self.audit.path else None},
+            # D023 (issue #19): rotation settings and the last write error so
+            # a silently stopped audit is visible, not only in the container log.
+            "audit": {
+                "enabled": self.audit.enabled,
+                "path": str(self.audit.path) if self.audit.path else None,
+                "size_bytes": self.audit.size_bytes,
+                "max_bytes": self.audit.max_bytes,
+                "keep": self.audit.keep,
+                "error": self.audit.error,
+            },
         }
 
     def health(self) -> dict[str, Any]:
@@ -491,8 +518,13 @@ class PVEHub:
 
 
 class BearerAuthMiddleware:
-    """Constant-time bearer check for the MCP endpoint and the readiness probe.
+    """Constant-time bearer check with per-client audit attribution (D019).
 
+    ``credentials`` maps client name -> bearer token; the legacy single token
+    is exposed under the reserved name :data:`pvehub_mcp.clientid.LEGACY`.
+    On success the resolved client name is stored in
+    :data:`pvehub_mcp.clientid.client_context` for the duration of the
+    request, so the tool wrapper can attribute every audit entry (issue #21).
     The ``/mcp`` prefix is owned by the MCP SDK app; additional exact paths
     (the ``/ready`` readiness endpoint) are listed in ``protected_paths``.
     """
@@ -500,12 +532,12 @@ class BearerAuthMiddleware:
     def __init__(
         self,
         app: Any,
-        token: str,
+        credentials: dict[str, str],
         protected_prefix: str = "/mcp",
         protected_paths: frozenset[str] = frozenset(),
     ) -> None:
         self.app = app
-        self.token = token
+        self.credentials = credentials
         self.protected_prefix = protected_prefix
         self.protected_paths = protected_paths
 
@@ -519,8 +551,8 @@ class BearerAuthMiddleware:
             return
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
         supplied = headers.get(b"authorization", b"").decode("latin-1")
-        expected = f"Bearer {self.token}"
-        if not secrets.compare_digest(supplied, expected):
+        client = resolve_client(supplied, self.credentials)
+        if client is None:
             response = JSONResponse(
                 {"error": "unauthorized", "message": "missing or invalid bearer token"},
                 status_code=401,
@@ -528,7 +560,11 @@ class BearerAuthMiddleware:
             )
             await response(scope, receive, send)
             return
-        await self.app(scope, receive, send)
+        token = client_context.set(client)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            client_context.reset(token)
 
 
 def _transport_security(settings: Settings) -> TransportSecuritySettings:
@@ -590,10 +626,14 @@ def build_http_app(hub: PVEHub) -> Starlette:
 
     app.router.routes.insert(0, Route("/ready", ready, methods=["GET"]))
     app.router.routes.insert(0, Route("/health", health, methods=["GET"]))
+    credentials: dict[str, str] = {}
     if hub.settings.mcp_auth_token is not None:
+        credentials[LEGACY] = hub.settings.mcp_auth_token.get_secret_value()
+    credentials.update(hub.settings.mcp_auth_tokens)
+    if credentials:
         app.add_middleware(
             BearerAuthMiddleware,
-            token=hub.settings.mcp_auth_token.get_secret_value(),
+            credentials=credentials,
             protected_prefix="/mcp",
             protected_paths=frozenset({"/ready"}),
         )
@@ -605,13 +645,27 @@ def build_http_app(hub: PVEHub) -> Starlette:
     return app
 
 
-def _target(kwargs: dict[str, Any]) -> str | None:
-    for key in ("vmid", "node", "store", "name", "path", "command"):
+_TARGET_KEYS = ("vmid", "node", "store", "name", "path", "command")
+
+
+def _target(kwargs: dict[str, Any]) -> str | dict[str, str] | None:
+    """Collect **all** present target keys, redacted (D023, issue #18).
+
+    A single key keeps the legacy string form so existing log consumers keep
+    working; two or more keys are returned as a ``{key: "key=value"}`` dict.
+    """
+
+    parts: dict[str, str] = {}
+    for key in _TARGET_KEYS:
         value = kwargs.get(key)
         if value is not None:
             redacted = redact_value(f"{key}={value}")
-            return redacted if isinstance(redacted, str) else str(redacted)
-    return None
+            parts[key] = redacted if isinstance(redacted, str) else str(redacted)
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return next(iter(parts.values()))
+    return parts
 
 
 def _shrink(text: str, limit: int) -> str:

@@ -183,6 +183,74 @@ it exposes no control data). Per-client attribution (named tokens, `client` fiel
 audit log) and OAuth2 client-credentials against Pocket ID are out of scope for this
 fix and tracked as follow-up work in issue #16.
 
+## D019 — Per-client audit attribution: named MCP tokens (issue #21)
+
+**Context:** 0.1.0 had a single `PVEHUB_MCP_AUTH_TOKEN` for the whole http transport.
+Two operational problems: (a) rotating that token (leak, staff change, routine) logged
+out *every* client at once — there is no per-client revocation; (b) the audit log
+(its whole purpose per D014 is "who ran what") could not attribute a tool call to a
+client: every entry said "someone". For a box whose token can run `exec_host`,
+post-incident "which client" is the first question, and it was unanswerable.
+
+**Decision:** `PVEHUB_MCP_AUTH_TOKENS` (env) / `mcp_auth_tokens` (YAML) maps
+*client name* -> *bearer token* (`name:token,name2:token2` in env). The legacy token
+remains and is exposed to the middleware under the reserved name `default`, so existing
+deployments keep working. Rules: names are 1-32 chars of `[a-z0-9_-]` (letter or digit
+first), `default` is reserved, every token is >= 16 chars, and a named token must not
+equal the legacy token (one secret, two identities = ambiguous attribution). Config
+validation enforces all of this at startup; the http transport requires *at least one*
+of legacy/named tokens unless `PVEHUB_MCP_AUTH_REQUIRED=false` on loopback.
+
+The middleware compares the presented bearer against **all** known tokens
+(`secrets.compare_digest` per candidate) and, on success, stores the resolved name in a
+`ContextVar` for the duration of the request. The tool wrapper (the single choke point
+through which every tool call passes, D014) reads it and writes `client` into every
+audit entry — including denials and errors, which is where attribution matters most.
+The MCP SDK runs tool calls in a child task; contextvars propagate to it, so the
+attribution survives that hop (covered by `tests/test_attribution.py`). stdio and
+unauthenticated loopback setups attribute to `unknown` — the field is always present,
+so log consumers can rely on the schema.
+
+**Consequences:** Per-client revocation is a config reload, not a global outage; audit
+entries are attributable; a leaked token compromises exactly one client. The reserved
+`default` name and the "one token = one identity" rule keep attribution unambiguous.
+OAuth2 client-credentials against Pocket ID remains the longer-term path (issue #16
+follow-up) and would slot into the same `client` field.
+
+## D020 — Audit log tail: `pvehub_audit_tail` + `read_audit_tail` (issue #20)
+
+**Context:** The audit log is the server's only "what happened" record, but reading it
+required shell access to the container (`docker exec ... tail /data/audit.jsonl`).
+That (a) bypasses MCP as the single control plane, (b) hands the reader unredacted
+bytes — the redaction is applied on the *write* path (D014), and a direct read of the
+file re-exposes anything a redaction rule misses, and (c) gives no way to filter by
+tool/status/client without grep pipelines on the host.
+
+**Decision:** `read_audit_tail(path, max_lines, ...)` in `pvehub_mcp/audit.py` reads the
+last N entries *in file order* by scanning backward from the end of the file in
+64 KiB chunks, bounded by an 8 MiB `window_bytes` cap — a 10 MiB log never enters
+memory. Malformed lines are skipped, never raised (the reader must not take the audit
+down). Every returned entry passes through `redact_value` **again** on the way out:
+redaction is write-time *and* read-time, so no code path can emit an unredacted entry.
+The `pvehub_audit_tail` tool (category `read`, D014) wraps it with `limit` (1..500),
+`tool`, `category`, `status`, `client` (D019) and `since` (ISO-8601) filters applied
+in memory after the capped read. `limit` is clamped, not truncated; an invalid value
+is a structured `invalid_argument`, not a traceback.
+
+The audit *state* itself is also observable in-band: `pvehub_capabilities` (an
+authenticated, audited tool — the right place) reports `enabled`, `path`,
+`size_bytes`, `max_bytes`, `keep` and the **last write error** (D023). A silently
+stopped audit (full volume, lost permissions) is now visible from the control plane
+instead of only in the container log. `pvehub_health` reports `enabled`/`path` only —
+the health endpoints (D021) deliberately stay minimal.
+
+**Consequences:** Audit inspection is an MCP call with the same authentication as
+everything else, is redacted, and is bounded in memory. The 8 MiB window is a
+*read* cap: with `limit=500` and large entries it can still return fewer than 500
+entries if the window is exhausted — the response is honest about what it returned, it
+just does not pretend to have the whole tail. `since`/`client` filters operate on the
+window, not the whole file (documented in the tool docstring).
+
 ## D021 — Health: liveness (`/health`, minimal) vs readiness (`/ready`, authenticated) (issues #23, #24)
 
 **Context:** In 0.1.0, `GET /health` answered 200 with the full health body (`status`,
@@ -216,3 +284,54 @@ use `/ready` with the token; pure process-liveness monitors may use `/health`. s
 deployments remain `unhealthy` (no HTTP listener) — expected and documented. This
 supersedes the `/health` remark in D018 and resolves F-13 of the security review (see
 the 0.1.1 addendum in `docs/SECURITY_REVIEW.md`).
+
+## D023 — Audit completeness: rotation, write-error surfacing, full target/error records (issues #18, #19)
+
+**Context:** 0.1.0 audit entries were incomplete and the log was unmanaged. (a) The
+`target` field captured a *single* key (the first of `vmid`/`node`/... present) as a
+`key=value` string: a call that addressed both a node and a VM (the common case —
+`/nodes/<node>/qemu/<vmid>`) lost half its targeting. (b) A forced denial or a tool
+error left only the status string; *why* it was denied (policy rule, confirm gate,
+permission) was not in the log, so the log could not answer "was this a misconfiguration
+or an attack". (c) `output_bytes` was missing, so the size of what a call *would* have
+returned (or did, with `PVEHUB_AUDIT_INCLUDE_RESULTS`) was unknown. (d) The JSONL file
+grew without bound: a busy box fills the LXC volume, and an audit that stops because
+the disk is full is exactly when you want it. (e) A write failure (permission lost,
+volume full) was dropped on the floor — the audit could die silently (D014's premise is
+that the log is trustworthy, which it is not if it can stop quietly).
+
+**Decision:**
+
+* **`target` collects *all* present target keys** (D012 named instances make
+  `node`/`vmid`/`store`/`path`/... all meaningful). A single key keeps the legacy
+  `key=value` *string* so existing log consumers (jq pipelines, alerting) keep working
+  unchanged; **two or more keys are a `{key: "key=value"}` dict** — the first breaking
+  change in the schema, flagged in the changelog. Every value passes the same
+  `redact_value` as everything else (a `command=` value is masked wholesale).
+* **Denials and errors carry `error: {code, message}`** — the typed error's own code
+  (`policy_denied`, `confirm_required`, `invalid_argument`, `permission_denied`, ...)
+  and message, so the log distinguishes "blocked by policy X" from "caller forgot
+  confirm" from "no permission for Y" without leaving the log.
+* **`output_bytes`** records the size of the (redacted, shrunk) response that was
+  actually returned, on every status including `error` (where it is `0`/`null` as
+  appropriate).
+* **Size-based rotation** (`PVEHUB_AUDIT_MAX_BYTES`, default 10 MiB;
+  `PVEHUB_AUDIT_KEEP`, default 5): before each write the *active* file is checked;
+  over the cap, `audit.jsonl` -> `.1`, `.1` -> `.2`, ... and the oldest archive is
+  dropped to hold `keep` files. Rotation is the writer's job, single-writer by
+  construction (one process, one file), so there is no rename race. Archives keep
+  `0600`.
+* **Write failures are recorded, not dropped.** `AuditLogger.error` holds the last
+  failure (type + message) and is surfaced in the `pvehub_capabilities` report (D020),
+  so "the audit stopped and here is why" is one MCP call away. The logger keeps
+  trying (a transient full-volume error clears itself); a *missing* file (never
+  created) is `enabled=false`, reported the same way.
+
+**Consequences:** The log answers "what, where, to what, by whom (D019), with what
+result size, and why not" for every call, including the ones that did nothing.
+`target` schema: consumers that pattern-matched the string form still work for
+single-key calls; multi-key calls need the dict (changelog, `docs/TOOLS.md`). Rotation
+is size-based and local (no external tooling); `keep` bounds total audit storage to
+`keep * max_bytes`. The `pvehub_audit_tail` reader (D020) reads the *active* file only;
+archived entries are out of its scope by design (they are for the operator, not the
+control plane).

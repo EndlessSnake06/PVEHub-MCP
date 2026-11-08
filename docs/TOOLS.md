@@ -8,7 +8,7 @@ blocked by policy, missing token permissions or missing SSH prerequisites.
 
 Regenerate with `make docs-tools` or `uv run python scripts/generate_tool_docs.py > docs/TOOLS.md`.
 
-**74 tools** in 19 of 19 tool modules.
+**75 tools** in 19 of 19 tool modules.
 
 | Tool | Category | PVE privilege/path | PBS privilege/path | Shell | Description |
 |---|---|---|---|---|---|
@@ -55,6 +55,7 @@ Regenerate with `make docs-tools` or `uv run python scripts/generate_tool_docs.p
 | `pve_task_log` | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Read a task log tail (start line offset, limit up to 1000 lines). |
 | `pve_task_status` | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Show a task's status and exit status by UPID. |
 | `pve_tasks_list` | `read` | `Sys.Audit` on `/nodes` | — | — | List recent tasks, newest first. |
+| `pvehub_audit_tail` | `read` | — | — | — | Tail the redacted audit log (last N entries, oldest first). |
 | `pvehub_capabilities` | `read` | — | — | — | Show registered tools, policy blocks, token privileges and shell prerequisites. |
 | `pvehub_health` | `read` | — | — | — | Liveness and capability discovery status of this MCP server. |
 | `pve_guest_migrate` | `lifecycle` | `VM.Migrate` on `/vms/{vmid}` | — | — | Migrate a guest to another cluster node. |

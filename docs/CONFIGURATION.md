@@ -76,12 +76,15 @@ PBS instance.
 | `PVEHUB_TRANSPORT` | `http` | `http` (Streamable HTTP at `/mcp`) or `stdio` | no |
 | `PVEHUB_HOST` | `127.0.0.1` | Bind address for HTTP | no |
 | `PVEHUB_PORT` | `8080` | Bind port for HTTP | no |
-| `PVEHUB_MCP_AUTH_TOKEN` | unset | Bearer token checked on every `/mcp` request and on `GET /ready`; **required for the http transport** (see `PVEHUB_MCP_AUTH_REQUIRED`) | **yes** |
-| `PVEHUB_MCP_AUTH_REQUIRED` | `true` | When `true` (default), the http transport refuses to start without `PVEHUB_MCP_AUTH_TOKEN`. `false` allows an unauthenticated `/mcp` on loopback binds only (development); non-loopback binds stay refused | no |
+| `PVEHUB_MCP_AUTH_TOKEN` | unset | Bearer token checked on every `/mcp` request and on `GET /ready`; the http transport needs **at least one** of this / `PVEHUB_MCP_AUTH_TOKENS` (see `PVEHUB_MCP_AUTH_REQUIRED`) | **yes** |
+| `PVEHUB_MCP_AUTH_TOKENS` | unset | Per-client named tokens for audit attribution (D019, issue #21): `name:token,name2:token2`. Name 1-32 chars of `[a-z0-9_-]` (letter/digit first), `default` reserved, token >= 16 chars, must not equal `PVEHUB_MCP_AUTH_TOKEN`. The resolved name is written as `client` into every audit entry; rotating one client's token does not affect the others | **yes** |
+| `PVEHUB_MCP_AUTH_REQUIRED` | `true` | When `true` (default), the http transport refuses to start without `PVEHUB_MCP_AUTH_TOKEN` **or** `PVEHUB_MCP_AUTH_TOKENS`. `false` allows an unauthenticated `/mcp` on loopback binds only (development); non-loopback binds stay refused | no |
 | `PVEHUB_ALLOWED_HOSTS` | empty | Comma-separated `Host`/`Origin` allowlist; enables DNS-rebinding protection. Empty disables that protection | no |
 | `PVEHUB_POLICY_FILE` | `/config/policy.yaml` | Path to the policy YAML | no |
 | `PVEHUB_AUDIT_LOG` | `/data/audit.jsonl` | JSONL audit path. Disable with YAML `audit_log: null`; an empty env value is ignored | no |
 | `PVEHUB_AUDIT_INCLUDE_RESULTS` | `false` | Also log tool result bodies (can contain secrets) | no |
+| `PVEHUB_AUDIT_MAX_BYTES` | `10485760` (10 MiB) | Rotate the active audit file once it exceeds this size (D023, issue #19) | no |
+| `PVEHUB_AUDIT_KEEP` | `5` | Number of rotated copies to keep (`audit.jsonl.1` … `.N`); the oldest is dropped | no |
 | `PVEHUB_STATE_DIR` | `/data` | Cache/state directory (API schema cache) | no |
 | `PVEHUB_TASK_TIMEOUT_SECONDS` | `300` | Default timeout for asynchronous PVE/PBS tasks (UPID) | no |
 | `PVEHUB_MAX_OUTPUT_BYTES` | `65536` | Hard cap for a tool response (minimum 1024) | no |
@@ -166,6 +169,8 @@ transport: http            # http | stdio
 host: 0.0.0.0
 port: 8080
 mcp_auth_token: ${PVEHUB_MCP_AUTH_TOKEN}
+mcp_auth_tokens:                # optional, per-client (D019, issue #21);
+  webui: ${PVEHUB_WEBUI_TOKEN}  #   rotating webui does not log out the others
 mcp_auth_required: true        # false: unauthenticated /mcp, loopback dev setups only
 allowed_hosts: ["pvehub.example.com", "192.168.1.20:8080"]
 
@@ -211,6 +216,9 @@ ssh:
 policy_file: /config/policy.yaml
 audit_log: /data/audit.jsonl
 audit_include_results: false
+# Rotation (D023, issue #19): rotate at 10 MiB, keep 5 copies (oldest dropped)
+audit_max_bytes: 10485760
+audit_keep: 5
 state_dir: /data
 task_timeout_seconds: 300
 max_output_bytes: 65536
@@ -228,8 +236,9 @@ allow_insecure_http: false
 | `transport` | `http` \| `stdio` | `http` | `http` serves `/mcp`, `/health` (liveness) and `/ready` (authenticated readiness) |
 | `host` | string | `127.0.0.1` | see `mcp_auth_required`/`mcp_auth_token` |
 | `port` | int | `8080` | |
-| `mcp_auth_token` | string (secret) | unset | constant-time bearer check on `/mcp` |
-| `mcp_auth_required` | bool | `true` | http transport refuses to start without `mcp_auth_token`; `false` = unauthenticated loopback development only, non-loopback stays refused |
+| `mcp_auth_token` | string (secret) | unset | constant-time bearer check on `/mcp` and `/ready`; the legacy token, exposed under the reserved client `default` |
+| `mcp_auth_tokens` | map[name] (secret) | unset | per-client named tokens (D019, issue #21); resolved name is written as `client` into every audit entry |
+| `mcp_auth_required` | bool | `true` | http transport refuses to start without `mcp_auth_token` **or** `mcp_auth_tokens`; `false` = unauthenticated loopback development only, non-loopback stays refused |
 | `allowed_hosts` | list[str] | `[]` | enables DNS-rebinding protection; must contain the hostnames clients use |
 | `pve` | list[instance] | `[]` | at least one PVE or PBS instance required |
 | `pbs` | list[instance] | `[]` | |
@@ -237,6 +246,8 @@ allow_insecure_http: false
 | `policy_file` | string | `/config/policy.yaml` | |
 | `audit_log` | string \| null | `/data/audit.jsonl` | `null` disables audit |
 | `audit_include_results` | bool | `false` | |
+| `audit_max_bytes` | int | `10485760` | rotate the active file above this size (D023, issue #19) |
+| `audit_keep` | int | `5` | rotated copies to keep; the oldest is dropped |
 | `state_dir` | string | `/data` | |
 | `task_timeout_seconds` | float | `300` | |
 | `max_output_bytes` | int | `65536` | ≥ 1024 |
@@ -417,18 +428,33 @@ tools exist in the current tree.
 call:
 
 ```json
-{"ts":"2026-11-07T10:00:00Z","tool":"pve_api_call","category":"generic","status":"ok","instance":"pve1","target":"path=/nodes","params":{"path":"/nodes"},"duration_ms":42}
+{"ts":"2026-11-07T10:00:00Z","tool":"pve_api_call","category":"generic","status":"ok","instance":"pve1","client":"webui","target":"path=/nodes","params":{"path":"/nodes"},"duration_ms":42,"output_bytes":512}
 ```
 
-- `status` is `ok`, `denied` (policy) or `error`.
+- `status` is `ok`, `denied` (policy/confirm) or `error`.
+- `client` names the bearer that ran the call (D019, issue #21): the resolved name
+  of a `PVEHUB_MCP_AUTH_TOKENS` entry, `default` for the legacy token, or `unknown`
+  for stdio / unauthenticated loopback. The field is always present, so log consumers
+  can rely on the schema.
+- `target` keeps the legacy single-key `key=value` string for one key; with two or
+  more target keys it is a `{key: "key=value"}` dict so no targeting is lost (D023,
+  issue #18). Every value is redacted the same way as everything else.
+- On `denied`/`error`, `error: {code, message}` carries the typed error's own code
+  (`policy_denied`, `confirm_required`, `invalid_argument`, …) and message, so the log
+  distinguishes "blocked by policy" from "caller forgot confirm" from "no permission".
+- `output_bytes` is the size of the (redacted, shrunk) response actually returned, for
+  every status.
 - Parameter keys matching `pass`, `password`, `secret`, `token`, `api_key`,
   `private_key`, `authorization`, `cookie`, `csrf` are replaced with `***`; bearer
   tokens, `PVEAPIToken=`/`PBSAPIToken=` headers, private-key blocks and
   `password=`/`token=` query values are redacted inside strings.
 - Result bodies are only written with `audit_include_results: true`.
-- Writes are append-only and best-effort: an unwritable path disables auditing with
-  a warning instead of failing calls. There is no built-in rotation; use logrotate
-  or a log shipper on the host.
+- Rotation is built in (D023, issue #19): `audit_max_bytes` (default 10 MiB) bounds the
+  active file, `audit_keep` (default 5) the number of rotated copies
+  (`audit.jsonl.1` … `.N`, oldest dropped). A full volume or lost permissions no longer
+  kill the audit silently — the last write failure is recorded and surfaced by the
+  `pvehub_capabilities` report (`audit.error`), and the log is readable in-band via the
+  `pvehub_audit_tail` tool (D020, issue #20), which re-redacts on the way out.
 - The file must be writable by UID 10001 (the named volume is).
 
 ## Capabilities and tool visibility

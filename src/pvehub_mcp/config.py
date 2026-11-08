@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import urlparse
@@ -38,6 +39,25 @@ def _as_bool(value: str | bool | int) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _as_token_map(value: str | dict[str, str] | None) -> dict[str, str]:
+    """Parse ``PVEHUB_MCP_AUTH_TOKENS`` (``name:token,name2:token2``) into a dict.
+
+    The structural parsing (split points, missing colon, empty parts) is
+    delegated to :func:`pvehub_mcp.clientid.parse_token_pairs`; the config
+    validators add the name charset / length / collision rules.
+    """
+
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return {str(k): str(v) for k, v in value.items()}
+    if not str(value).strip():
+        return {}
+    from .clientid import parse_token_pairs
+
+    return dict(parse_token_pairs(str(value)))
 
 
 def _as_list(value: str | list[str] | None) -> list[str]:
@@ -198,6 +218,10 @@ class Settings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8080
     mcp_auth_token: SecretStr | None = None
+    #: Named MCP tokens for per-client audit attribution (D019, issue #21).
+    #: Maps client name -> bearer token; the legacy single token is exposed to
+    #: the middleware as the reserved client ``default``.
+    mcp_auth_tokens: dict[str, str] = Field(default_factory=dict)
     mcp_auth_required: bool = True
     allowed_hosts: list[str] = Field(default_factory=list)
 
@@ -208,6 +232,10 @@ class Settings(BaseModel):
     policy_file: str = "/config/policy.yaml"
     audit_log: str | None = "/data/audit.jsonl"
     audit_include_results: bool = False
+    #: Size cap for the active audit file in bytes (D023, issue #19).
+    audit_max_bytes: int = 10 * 1024 * 1024
+    #: Number of rotated archives to keep (audit.jsonl.1 ... .keep).
+    audit_keep: int = 5
     state_dir: str = "/data"
     task_timeout_seconds: float = 300.0
     max_output_bytes: int = 65536
@@ -222,6 +250,23 @@ class Settings(BaseModel):
     def _token_not_blank(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and not value.get_secret_value().strip():
             raise ValueError("mcp_auth_token must not be empty")
+        return value
+
+    @field_validator("mcp_auth_tokens")
+    @classmethod
+    def _named_tokens(cls, value: dict[str, str]) -> dict[str, str]:
+        from .clientid import valid_client_name
+
+        for name, token in value.items():
+            if not valid_client_name(name):
+                raise ValueError(
+                    f"named-token client {name!r} is invalid; use 1-32 characters of "
+                    "[a-z0-9_-] starting with a letter or digit, and not the reserved name 'default'"
+                )
+            if not token.strip():
+                raise ValueError(f"named-token for client {name!r} must not be empty")
+            if len(token) < 16:
+                raise ValueError(f"named-token for client {name!r} must be at least 16 characters")
         return value
 
     @model_validator(mode="after")
@@ -241,23 +286,44 @@ class Settings(BaseModel):
                 raise ValueError("mcp_auth_token must not be empty")
             if len(token) < 16:
                 raise ValueError("mcp_auth_token must be at least 16 characters")
-        if self.transport == "http" and self.mcp_auth_required and self.mcp_auth_token is None:
+            # A named token must not collide with the legacy token: the same
+            # secret under two names would make the audit attribution ambiguous.
+            for name, named_token in self.mcp_auth_tokens.items():
+                if secrets.compare_digest(named_token, token):
+                    raise ValueError(
+                        f"named-token for client {name!r} equals mcp_auth_token; "
+                        "each token must identify exactly one client"
+                    )
+        if (
+            self.transport == "http"
+            and self.mcp_auth_required
+            and self.mcp_auth_token is None
+            and not self.mcp_auth_tokens
+        ):
             raise ValueError(
-                "mcp_auth_token is required for the http transport; set PVEHUB_MCP_AUTH_TOKEN "
-                "or PVEHUB_MCP_AUTH_REQUIRED=false (loopback development setups only)"
+                "mcp_auth_token or mcp_auth_tokens is required for the http transport; "
+                "set PVEHUB_MCP_AUTH_TOKEN or PVEHUB_MCP_AUTH_TOKENS, or "
+                "PVEHUB_MCP_AUTH_REQUIRED=false (loopback development setups only)"
             )
         if (
             self.transport == "http"
             and not _is_loopback(self.host)
             and self.mcp_auth_token is None
+            and not self.mcp_auth_tokens
         ):
-            raise ValueError("refusing to bind a non-loopback address without mcp_auth_token")
+            raise ValueError(
+                "refusing to bind a non-loopback address without mcp_auth_token/mcp_auth_tokens"
+            )
         for group in (self.pve, self.pbs):
             names = [instance.name for instance in group]
             if len(names) != len(set(names)):
                 raise ValueError(f"duplicate instance names: {names}")
         if self.max_output_bytes < 1024:
             raise ValueError("max_output_bytes must be at least 1024")
+        if self.audit_max_bytes < 1024:
+            raise ValueError("audit_max_bytes must be at least 1024")
+        if self.audit_keep < 1:
+            raise ValueError("audit_keep must be at least 1")
         return self
 
     def pve_instance(self, name: str | None) -> PVEInstance:
@@ -318,11 +384,14 @@ def _apply_env(data: dict[str, Any]) -> dict[str, Any]:
         "PVEHUB_HOST": ("host", str),
         "PVEHUB_PORT": ("port", int),
         "PVEHUB_MCP_AUTH_TOKEN": ("mcp_auth_token", str),
+        "PVEHUB_MCP_AUTH_TOKENS": ("mcp_auth_tokens", _as_token_map),
         "PVEHUB_MCP_AUTH_REQUIRED": ("mcp_auth_required", _as_bool),
         "PVEHUB_ALLOWED_HOSTS": ("allowed_hosts", _as_list),
         "PVEHUB_POLICY_FILE": ("policy_file", str),
         "PVEHUB_AUDIT_LOG": ("audit_log", str),
         "PVEHUB_AUDIT_INCLUDE_RESULTS": ("audit_include_results", _as_bool),
+        "PVEHUB_AUDIT_MAX_BYTES": ("audit_max_bytes", int),
+        "PVEHUB_AUDIT_KEEP": ("audit_keep", int),
         "PVEHUB_STATE_DIR": ("state_dir", str),
         "PVEHUB_TASK_TIMEOUT_SECONDS": ("task_timeout_seconds", float),
         "PVEHUB_MAX_OUTPUT_BYTES": ("max_output_bytes", int),
