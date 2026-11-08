@@ -27,6 +27,10 @@ class ConfigError(PVEHubError):
     code = "config_error"
 
 
+class AuditDisabled(PVEHubError):
+    code = "audit_disabled"
+
+
 class PolicyError(PVEHubError):
     code = "policy_denied"
 
