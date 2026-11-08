@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. Format: Keep a Changelog;
 versioning: Semantic Versioning.
 
-## [Unreleased]
+## [0.1.1] — 2026-11-08
 
 ### Added
 
@@ -68,6 +68,9 @@ versioning: Semantic Versioning.
 - `docs/TOOLS.md` (and `make docs-tools`) now renders the derived titles in a
   `Title` column and the confirm note for the default confirm categories, and
   the doc generator honors a literal `title=` override (issue #22).
+- The runtime version is single-sourced in `pvehub_mcp/_version.py`; `server.py` and the
+  outgoing `User-Agent` header (`pvehub-mcp/<version>`) read it from there, and a packaging
+  test pins it to `pyproject.toml` so a release cannot drift.
 
 ### Security
 

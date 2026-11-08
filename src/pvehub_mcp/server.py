@@ -19,6 +19,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from ._version import __version__ as __version__
 from .audit import AuditLogger, redact_value
 from .capabilities import CapabilityManager, Privilege
 from .clientid import LEGACY, client_context, current_client, resolve_client
@@ -32,8 +33,6 @@ from .toolnaming import derive_title
 from .tools.common import dumps, fail
 
 logger = logging.getLogger(__name__)
-
-__version__ = "0.1.0"
 
 # Stable, greppable notes appended to the description of every tool whose
 # category is in ``safety.require_confirm_for``. The static doc generator

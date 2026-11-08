@@ -3,7 +3,7 @@
 One MCP server for **Proxmox VE** and **Proxmox Backup Server**, plus shell access to PVE
 hosts, LXC containers, QEMU VMs (guest agent) and the PBS host.
 
-> Status: `0.1.0` — core server, policy engine, curated PVE/PBS/exec tools and packaging are
+> Status: `0.1.1` — core server, policy engine, curated PVE/PBS/exec tools and packaging are
 > implemented. `docs/TOOLS.md` is generated from the code and shows exactly what exists today;
 > `docs/STATUS.md` separates live-verified, mocked and untested behaviour.
 
@@ -125,7 +125,7 @@ Claude Desktop launches stdio servers itself. Run the same image with `-i` and n
         "-v", "/Users/you/pvehub/config:/config:ro",
         "-v", "/Users/you/pvehub/ssh:/ssh:ro",
         "-v", "pvehub-data:/data",
-        "pvehub-mcp:0.1.0"
+        "pvehub-mcp:0.1.1"
       ]
     }
   }
@@ -277,7 +277,7 @@ Notes:
 make install        # uv sync --extra dev
 make check          # ruff + mypy + pytest
 make docs-tools     # regenerate docs/TOOLS.md from @hub.tool declarations
-make docker-build   # docker build -t pvehub-mcp:0.1.0 .
+make docker-build   # docker build -t pvehub-mcp:0.1.1 .
 ```
 
 The Docker image is built by CI (`.gitea/workflows/ci.yml`); the development sandbox has
