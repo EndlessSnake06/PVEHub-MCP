@@ -109,9 +109,9 @@ def _line(content: str, prefix: str) -> str:
 def test_generated_catalog_is_complete_and_titled() -> None:
     content = _run_script()
     rows = _table_rows(content)
-    assert len(ALL_NAMES) == 74
+    assert len(ALL_NAMES) == 75
     assert set(rows) == set(ALL_NAMES)
-    assert "**74 tools**" in content
+    assert "**75 tools**" in content
     for name in ALL_NAMES:
         assert rows[name] == derive_title(name), name
         assert "_" not in rows[name]

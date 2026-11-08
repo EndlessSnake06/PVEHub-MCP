@@ -10,83 +10,83 @@ Regenerate with `make docs-tools` or `uv run python scripts/generate_tool_docs.p
 
 **75 tools** in 19 of 19 tool modules.
 
-| Tool | Category | PVE privilege/path | PBS privilege/path | Shell | Description |
-|---|---|---|---|---|---|
-| `file_pull_host` | `read` | — | — | `files` | Read a file from a PVE node over SFTP, returned as base64. |
-| `file_read_guest` | `read` | `VM.GuestAgent.FileRead` on `/vms/{vmid}` | — | `guest` | Read a file from a QEMU VM through the guest agent. |
-| `pbs_api_schema` | `read` | — | — | — | Describe a PBS API path (methods, parameters, return type) or search paths. |
-| `pbs_datastore_status` | `read` | — | `Datastore.Audit` on `/datastore/{store}` | — | Read datastore usage, snapshot counts and GC information. |
-| `pbs_datastores_list` | `read` | — | `Datastore.Audit` on `/datastore` | — | List accessible PBS datastores. |
-| `pbs_health` | `read` | — | `Datastore.Audit` on `/datastore` | — | Bounded PBS overview: datastore usage/GC plus recent failed tasks. |
-| `pbs_namespaces_list` | `read` | — | `Datastore.Audit` on `/datastore/{store}` | — | List the backup namespaces of a datastore. |
-| `pbs_prune_jobs_list` | `read` | — | `Datastore.Audit` on `/datastore` | — | List scheduled prune jobs. |
-| `pbs_remotes_list` | `read` | — | `Remote.Audit` on `/remote` | — | List configured sync remotes (credentials redacted). |
-| `pbs_snapshots_list` | `read` | — | `Datastore.Audit` on `/datastore/{store}` | — | List backup snapshots, optionally filtered by type, ID and namespace. |
-| `pbs_sync_jobs_list` | `read` | — | `Datastore.Audit` on `/datastore`<br>`Remote.Audit` on `/remote` | — | List scheduled sync jobs (pull, push, or all). |
-| `pbs_task_log` | `read` | — | `Sys.Audit` on `/system` | — | Read a PBS task log (start offset plus line limit). |
-| `pbs_task_status` | `read` | — | `Sys.Audit` on `/system` | — | Read the status of a PBS task. |
-| `pbs_tasks_list` | `read` | — | `Sys.Audit` on `/system` | — | List PBS tasks, optionally only failed or running ones. |
-| `pbs_verify_jobs_list` | `read` | — | `Datastore.Audit` on `/datastore` | — | List scheduled verification jobs. |
-| `pve_access_acl` | `read` | `Sys.Audit` on `/access` | — | — | List ACL entries (path, user/group, role, propagate) effective for this token. |
-| `pve_access_groups` | `read` | `Sys.Audit` on `/access` | — | — | List PVE groups with their member users. |
-| `pve_access_roles` | `read` | `Sys.Audit` on `/access` | — | — | List PVE roles and their privileges. |
-| `pve_access_users` | `read` | `Sys.Audit` on `/access` | — | — | List PVE users with realm, groups and enabled state. |
-| `pve_api_schema` | `read` | — | — | — | Describe a PVE API path (methods, parameters, return type) or search paths. |
-| `pve_backup_list` | `read` | `Datastore.Audit` on `/storage/{storage}` | — | — | List backup volumes on a storage, optionally only for one VMID. |
-| `pve_cluster_log` | `read` | `Sys.Syslog` on `/` | — | — | Read the recent cluster log (max entries capped at 500). |
-| `pve_cluster_resources` | `read` | `Sys.Audit` on `/` | — | — | List cluster resources (nodes, guests, storage, pools) with a compact summary. |
-| `pve_cluster_status` | `read` | `Sys.Audit` on `/` | — | — | Show cluster quorum and membership from /cluster/status. |
-| `pve_guest_agent_ping` | `read` | `VM.GuestAgent.Audit` on `/vms/{vmid}` | — | — | Ping the QEMU guest agent to check whether it is installed and running. |
-| `pve_guest_config` | `read` | `VM.Audit` on `/vms/{vmid}` | — | — | Read a guest configuration; secret-like values are redacted. |
-| `pve_guest_snapshots` | `read` | `VM.Audit` on `/vms/{vmid}` | — | — | List snapshots of a guest, including the current state entry. |
-| `pve_guest_status` | `read` | `VM.Audit` on `/vms/{vmid}` | — | — | Show a guest's runtime status (state, uptime, CPU, memory, disks, network). |
-| `pve_guests_list` | `read` | `VM.Audit` on `/vms` | — | — | List QEMU VMs and LXC containers with status, resource usage and node. |
-| `pve_ha_groups` | `read` | `Sys.Audit` on `/` | — | — | List HA node affinity groups with member nodes and flags. |
-| `pve_ha_resources` | `read` | `Sys.Audit` on `/` | — | — | List HA-managed resources; type filters ct or vm. |
-| `pve_ha_status` | `read` | `Sys.Audit` on `/` | — | — | Show current HA manager status (quorum, master, LRM and service states). |
-| `pve_network_interface` | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Show one network interface's configuration and state on a node. |
-| `pve_network_list` | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | List a node's network interfaces (bridges, bonds, VLANs, physical NICs). |
-| `pve_node_rrddata` | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Read node RRD metrics (cpu, memory, network, disk) for a timeframe. |
-| `pve_node_status` | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Show a node's PVE version, CPU, memory, root filesystem and load average. |
-| `pve_nodes_list` | `read` | `Sys.Audit` on `/nodes` | — | — | List cluster nodes with status, CPU, memory and uptime. |
-| `pve_storage_content` | `read` | `Datastore.Audit` on `/storage/{storage}` | — | — | List volumes on a storage; content and vmid narrow the result. |
-| `pve_storage_list` | `read` | `Datastore.Audit` on `/storage` | — | — | List storages with type, content types, usage and shared flag. |
-| `pve_storage_status` | `read` | `Datastore.Audit` on `/storage/{storage}` | — | — | Show one storage's status on a node (active, total, used, available). |
-| `pve_task_log` | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Read a task log tail (start line offset, limit up to 1000 lines). |
-| `pve_task_status` | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Show a task's status and exit status by UPID. |
-| `pve_tasks_list` | `read` | `Sys.Audit` on `/nodes` | — | — | List recent tasks, newest first. |
-| `pvehub_audit_tail` | `read` | — | — | — | Tail the redacted audit log (last N entries, oldest first). |
-| `pvehub_capabilities` | `read` | — | — | — | Show registered tools, policy blocks, token privileges and shell prerequisites. |
-| `pvehub_health` | `read` | — | — | — | Liveness and capability discovery status of this MCP server. |
-| `pve_guest_migrate` | `lifecycle` | `VM.Migrate` on `/vms/{vmid}` | — | — | Migrate a guest to another cluster node. |
-| `pve_guest_power` | `lifecycle` | `VM.PowerMgmt` on `/vms/{vmid}` | — | — | Start, stop, shutdown, reboot, suspend or resume a guest. |
-| `file_push_host` | `write` | — | — | `files` | Write a base64 payload to a file on a PVE node over SFTP (write category). |
-| `file_write_guest` | `write` | `VM.GuestAgent.FileWrite` on `/vms/{vmid}` | — | `guest` | Write a file inside a QEMU VM through the guest agent (write category). |
-| `pbs_job_run` | `write` | — | `Datastore.Modify` on `/datastore` | — | Run a scheduled prune, verify or sync job now (requires confirm=true). |
-| `pbs_namespace_create` | `write` | — | `Datastore.Modify` on `/datastore/{store}` | — | Create a namespace below an optional parent namespace. |
-| `pbs_snapshot_protect` | `write` | — | `Datastore.Modify` on `/datastore/{store}` | — | Enable or disable prune protection for one backup snapshot. |
-| `pbs_verify` | `write` | — | `Datastore.Verify` on `/datastore/{store}` | — | Verify one snapshot, one backup group, or a whole datastore. |
-| `pve_backup_start` | `write` | `VM.Backup` on `/vms/{vmid}`<br>`Datastore.AllocateSpace` on `/storage/{storage}` | — | — | Start a vzdump backup of one guest. |
-| `pve_guest_clone` | `write` | `VM.Clone` on `/vms/{vmid}`<br>`VM.Allocate` on `/vms/{newid}`<br>`Datastore.AllocateSpace` on `/storage` | — | — | Clone a guest to a new VMID; full=false creates a linked clone. |
-| `pve_guest_create_lxc` | `write` | `VM.Allocate` on `/vms/{vmid}`<br>`Datastore.AllocateSpace` on `/storage/{storage}` | — | — | Create an LXC container from a template. |
-| `pve_guest_create_vm` | `write` | `VM.Allocate` on `/vms/{vmid}`<br>`Datastore.AllocateSpace` on `/storage/{storage}` | — | — | Create an empty QEMU VM; disks and NICs are optional but usually required to boot. |
-| `pve_guest_resize` | `write` | `VM.Config.Disk` on `/vms/{vmid}` | — | — | Grow a guest disk; size is absolute ('32G') or relative ('+8G'). |
-| `pve_guest_snapshot_create` | `write` | `VM.Snapshot` on `/vms/{vmid}` | — | — | Create a guest snapshot. |
-| `pbs_gc` | `destructive` | — | `Datastore.Modify` on `/datastore/{store}` | — | Show GC status (dry_run) or start garbage collection on a datastore. |
-| `pbs_namespace_delete` | `destructive` | — | `Datastore.Modify` on `/datastore/{store}` | — | Delete a namespace, optionally together with every group below it. |
-| `pbs_prune` | `destructive` | — | `Datastore.Modify` on `/datastore/{store}` | — | Prune one backup group; defaults to a dry-run plan. |
-| `pbs_snapshot_forget` | `destructive` | — | `Datastore.Modify` on `/datastore/{store}` | — | Delete one backup snapshot (requires confirm unless dry_run). |
-| `pve_backup_restore` | `destructive` | `VM.Allocate` on `/vms/{vmid}`<br>`Datastore.AllocateSpace` on `/storage/{storage}` | — | — | Restore a guest from a backup volume (requires confirm=true). |
-| `pve_guest_delete` | `destructive` | `VM.Allocate` on `/vms/{vmid}` | — | — | Destroy a guest and its disks permanently (requires confirm=true). |
-| `pve_guest_snapshot_delete` | `destructive` | `VM.Snapshot` on `/vms/{vmid}` | — | — | Delete a guest snapshot permanently (requires confirm=true). |
-| `pve_guest_snapshot_rollback` | `destructive` | `VM.Snapshot.Rollback` on `/vms/{vmid}` | — | — | Roll a guest back to a snapshot, discarding newer state (requires confirm=true). |
-| `pve_task_stop` | `destructive` | `Sys.Modify` on `/nodes/{node}` | — | — | Stop a running task (requires confirm=true). |
-| `exec_host` | `exec` | — | — | `host` | Run a shell command on a PVE node host over SSH (requires confirm). |
-| `exec_lxc` | `exec` | — | — | `lxc` | Run a shell command inside an LXC container via SSH + pct exec (requires confirm). |
-| `exec_pbs` | `exec` | — | — | `pbs` | Run a shell command on the PBS host over SSH (requires confirm). |
-| `exec_vm` | `exec` | `VM.GuestAgent.Unrestricted` on `/vms/{vmid}` | — | `vm` | Run a shell command inside a QEMU VM through the guest agent (requires confirm). |
-| `pbs_api_call` | `generic` | — | — | — | Call an arbitrary PBS API endpoint through the token's permissions. |
-| `pve_api_call` | `generic` | — | — | — | Call an arbitrary PVE API endpoint through the token's permissions. |
+| Tool | Title | Category | PVE privilege/path | PBS privilege/path | Shell | Description |
+|---|---|---|---|---|---|---|
+| `file_pull_host` | File Pull Host | `read` | — | — | `files` | Read a file from a PVE node over SFTP, returned as base64. |
+| `file_read_guest` | File Read Guest | `read` | `VM.GuestAgent.FileRead` on `/vms/{vmid}` | — | `guest` | Read a file from a QEMU VM through the guest agent. |
+| `pbs_api_schema` | PBS API Schema | `read` | — | — | — | Describe a PBS API path (methods, parameters, return type) or search paths. |
+| `pbs_datastore_status` | PBS Datastore Status | `read` | — | `Datastore.Audit` on `/datastore/{store}` | — | Read datastore usage, snapshot counts and GC information. |
+| `pbs_datastores_list` | PBS Datastores List | `read` | — | `Datastore.Audit` on `/datastore` | — | List accessible PBS datastores. |
+| `pbs_health` | PBS Health | `read` | — | `Datastore.Audit` on `/datastore` | — | Bounded PBS overview: datastore usage/GC plus recent failed tasks. |
+| `pbs_namespaces_list` | PBS Namespaces List | `read` | — | `Datastore.Audit` on `/datastore/{store}` | — | List the backup namespaces of a datastore. |
+| `pbs_prune_jobs_list` | PBS Prune Jobs List | `read` | — | `Datastore.Audit` on `/datastore` | — | List scheduled prune jobs. |
+| `pbs_remotes_list` | PBS Remotes List | `read` | — | `Remote.Audit` on `/remote` | — | List configured sync remotes (credentials redacted). |
+| `pbs_snapshots_list` | PBS Snapshots List | `read` | — | `Datastore.Audit` on `/datastore/{store}` | — | List backup snapshots, optionally filtered by type, ID and namespace. |
+| `pbs_sync_jobs_list` | PBS Sync Jobs List | `read` | — | `Datastore.Audit` on `/datastore`<br>`Remote.Audit` on `/remote` | — | List scheduled sync jobs (pull, push, or all). |
+| `pbs_task_log` | PBS Task Log | `read` | — | `Sys.Audit` on `/system` | — | Read a PBS task log (start offset plus line limit). |
+| `pbs_task_status` | PBS Task Status | `read` | — | `Sys.Audit` on `/system` | — | Read the status of a PBS task. |
+| `pbs_tasks_list` | PBS Tasks List | `read` | — | `Sys.Audit` on `/system` | — | List PBS tasks, optionally only failed or running ones. |
+| `pbs_verify_jobs_list` | PBS Verify Jobs List | `read` | — | `Datastore.Audit` on `/datastore` | — | List scheduled verification jobs. |
+| `pve_access_acl` | PVE Access Acl | `read` | `Sys.Audit` on `/access` | — | — | List ACL entries (path, user/group, role, propagate) effective for this token. |
+| `pve_access_groups` | PVE Access Groups | `read` | `Sys.Audit` on `/access` | — | — | List PVE groups with their member users. |
+| `pve_access_roles` | PVE Access Roles | `read` | `Sys.Audit` on `/access` | — | — | List PVE roles and their privileges. |
+| `pve_access_users` | PVE Access Users | `read` | `Sys.Audit` on `/access` | — | — | List PVE users with realm, groups and enabled state. |
+| `pve_api_schema` | PVE API Schema | `read` | — | — | — | Describe a PVE API path (methods, parameters, return type) or search paths. |
+| `pve_backup_list` | PVE Backup List | `read` | `Datastore.Audit` on `/storage/{storage}` | — | — | List backup volumes on a storage, optionally only for one VMID. |
+| `pve_cluster_log` | PVE Cluster Log | `read` | `Sys.Syslog` on `/` | — | — | Read the recent cluster log (max entries capped at 500). |
+| `pve_cluster_resources` | PVE Cluster Resources | `read` | `Sys.Audit` on `/` | — | — | List cluster resources (nodes, guests, storage, pools) with a compact summary. |
+| `pve_cluster_status` | PVE Cluster Status | `read` | `Sys.Audit` on `/` | — | — | Show cluster quorum and membership from /cluster/status. |
+| `pve_guest_agent_ping` | PVE Guest Agent Ping | `read` | `VM.GuestAgent.Audit` on `/vms/{vmid}` | — | — | Ping the QEMU guest agent to check whether it is installed and running. |
+| `pve_guest_config` | PVE Guest Config | `read` | `VM.Audit` on `/vms/{vmid}` | — | — | Read a guest configuration; secret-like values are redacted. |
+| `pve_guest_snapshots` | PVE Guest Snapshots | `read` | `VM.Audit` on `/vms/{vmid}` | — | — | List snapshots of a guest, including the current state entry. |
+| `pve_guest_status` | PVE Guest Status | `read` | `VM.Audit` on `/vms/{vmid}` | — | — | Show a guest's runtime status (state, uptime, CPU, memory, disks, network). |
+| `pve_guests_list` | PVE Guests List | `read` | `VM.Audit` on `/vms` | — | — | List QEMU VMs and LXC containers with status, resource usage and node. |
+| `pve_ha_groups` | PVE Ha Groups | `read` | `Sys.Audit` on `/` | — | — | List HA node affinity groups with member nodes and flags. |
+| `pve_ha_resources` | PVE Ha Resources | `read` | `Sys.Audit` on `/` | — | — | List HA-managed resources; type filters ct or vm. |
+| `pve_ha_status` | PVE Ha Status | `read` | `Sys.Audit` on `/` | — | — | Show current HA manager status (quorum, master, LRM and service states). |
+| `pve_network_interface` | PVE Network Interface | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Show one network interface's configuration and state on a node. |
+| `pve_network_list` | PVE Network List | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | List a node's network interfaces (bridges, bonds, VLANs, physical NICs). |
+| `pve_node_rrddata` | PVE Node Rrddata | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Read node RRD metrics (cpu, memory, network, disk) for a timeframe. |
+| `pve_node_status` | PVE Node Status | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Show a node's PVE version, CPU, memory, root filesystem and load average. |
+| `pve_nodes_list` | PVE Nodes List | `read` | `Sys.Audit` on `/nodes` | — | — | List cluster nodes with status, CPU, memory and uptime. |
+| `pve_storage_content` | PVE Storage Content | `read` | `Datastore.Audit` on `/storage/{storage}` | — | — | List volumes on a storage; content and vmid narrow the result. |
+| `pve_storage_list` | PVE Storage List | `read` | `Datastore.Audit` on `/storage` | — | — | List storages with type, content types, usage and shared flag. |
+| `pve_storage_status` | PVE Storage Status | `read` | `Datastore.Audit` on `/storage/{storage}` | — | — | Show one storage's status on a node (active, total, used, available). |
+| `pve_task_log` | PVE Task Log | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Read a task log tail (start line offset, limit up to 1000 lines). |
+| `pve_task_status` | PVE Task Status | `read` | `Sys.Audit` on `/nodes/{node}` | — | — | Show a task's status and exit status by UPID. |
+| `pve_tasks_list` | PVE Tasks List | `read` | `Sys.Audit` on `/nodes` | — | — | List recent tasks, newest first. |
+| `pvehub_audit_tail` | PVEHub Audit Tail | `read` | — | — | — | Tail the redacted audit log (last N entries, oldest first). |
+| `pvehub_capabilities` | PVEHub Capabilities | `read` | — | — | — | Show registered tools, policy blocks, token privileges and shell prerequisites. |
+| `pvehub_health` | PVEHub Health | `read` | — | — | — | Liveness and capability discovery status of this MCP server. |
+| `pve_guest_migrate` | PVE Guest Migrate | `lifecycle` | `VM.Migrate` on `/vms/{vmid}` | — | — | Migrate a guest to another cluster node. |
+| `pve_guest_power` | PVE Guest Power | `lifecycle` | `VM.PowerMgmt` on `/vms/{vmid}` | — | — | Start, stop, shutdown, reboot, suspend or resume a guest. |
+| `file_push_host` | File Push Host | `write` | — | — | `files` | Write a base64 payload to a file on a PVE node over SFTP (write category). |
+| `file_write_guest` | File Write Guest | `write` | `VM.GuestAgent.FileWrite` on `/vms/{vmid}` | — | `guest` | Write a file inside a QEMU VM through the guest agent (write category). |
+| `pbs_job_run` | PBS Job Run | `write` | — | `Datastore.Modify` on `/datastore` | — | Run a scheduled prune, verify or sync job now (requires confirm=true). |
+| `pbs_namespace_create` | PBS Namespace Create | `write` | — | `Datastore.Modify` on `/datastore/{store}` | — | Create a namespace below an optional parent namespace. |
+| `pbs_snapshot_protect` | PBS Snapshot Protect | `write` | — | `Datastore.Modify` on `/datastore/{store}` | — | Enable or disable prune protection for one backup snapshot. |
+| `pbs_verify` | PBS Verify | `write` | — | `Datastore.Verify` on `/datastore/{store}` | — | Verify one snapshot, one backup group, or a whole datastore. |
+| `pve_backup_start` | PVE Backup Start | `write` | `VM.Backup` on `/vms/{vmid}`<br>`Datastore.AllocateSpace` on `/storage/{storage}` | — | — | Start a vzdump backup of one guest. |
+| `pve_guest_clone` | PVE Guest Clone | `write` | `VM.Clone` on `/vms/{vmid}`<br>`VM.Allocate` on `/vms/{newid}`<br>`Datastore.AllocateSpace` on `/storage` | — | — | Clone a guest to a new VMID; full=false creates a linked clone. |
+| `pve_guest_create_lxc` | PVE Guest Create LXC | `write` | `VM.Allocate` on `/vms/{vmid}`<br>`Datastore.AllocateSpace` on `/storage/{storage}` | — | — | Create an LXC container from a template. |
+| `pve_guest_create_vm` | PVE Guest Create VM | `write` | `VM.Allocate` on `/vms/{vmid}`<br>`Datastore.AllocateSpace` on `/storage/{storage}` | — | — | Create an empty QEMU VM; disks and NICs are optional but usually required to boot. |
+| `pve_guest_resize` | PVE Guest Resize | `write` | `VM.Config.Disk` on `/vms/{vmid}` | — | — | Grow a guest disk; size is absolute ('32G') or relative ('+8G'). |
+| `pve_guest_snapshot_create` | PVE Guest Snapshot Create | `write` | `VM.Snapshot` on `/vms/{vmid}` | — | — | Create a guest snapshot. |
+| `pbs_gc` | PBS Gc | `destructive` | — | `Datastore.Modify` on `/datastore/{store}` | — | Show GC status (dry_run) or start garbage collection on a datastore. This tool is protected: the call is rejected unless confirm=true is passed. Use dry_run=true to preview the effect without executing. |
+| `pbs_namespace_delete` | PBS Namespace Delete | `destructive` | — | `Datastore.Modify` on `/datastore/{store}` | — | Delete a namespace, optionally together with every group below it. This tool is protected: the call is rejected unless confirm=true is passed. Use dry_run=true to preview the effect without executing. |
+| `pbs_prune` | PBS Prune | `destructive` | — | `Datastore.Modify` on `/datastore/{store}` | — | Prune one backup group; defaults to a dry-run plan. This tool is protected: the call is rejected unless confirm=true is passed. Use dry_run=true to preview the effect without executing. |
+| `pbs_snapshot_forget` | PBS Snapshot Forget | `destructive` | — | `Datastore.Modify` on `/datastore/{store}` | — | Delete one backup snapshot (requires confirm unless dry_run). This tool is protected: the call is rejected unless confirm=true is passed. Use dry_run=true to preview the effect without executing. |
+| `pve_backup_restore` | PVE Backup Restore | `destructive` | `VM.Allocate` on `/vms/{vmid}`<br>`Datastore.AllocateSpace` on `/storage/{storage}` | — | — | Restore a guest from a backup volume (requires confirm=true). This tool is protected: the call is rejected unless confirm=true is passed. Use dry_run=true to preview the effect without executing. |
+| `pve_guest_delete` | PVE Guest Delete | `destructive` | `VM.Allocate` on `/vms/{vmid}` | — | — | Destroy a guest and its disks permanently (requires confirm=true). This tool is protected: the call is rejected unless confirm=true is passed. Use dry_run=true to preview the effect without executing. |
+| `pve_guest_snapshot_delete` | PVE Guest Snapshot Delete | `destructive` | `VM.Snapshot` on `/vms/{vmid}` | — | — | Delete a guest snapshot permanently (requires confirm=true). This tool is protected: the call is rejected unless confirm=true is passed. Use dry_run=true to preview the effect without executing. |
+| `pve_guest_snapshot_rollback` | PVE Guest Snapshot Rollback | `destructive` | `VM.Snapshot.Rollback` on `/vms/{vmid}` | — | — | Roll a guest back to a snapshot, discarding newer state (requires confirm=true). This tool is protected: the call is rejected unless confirm=true is passed. Use dry_run=true to preview the effect without executing. |
+| `pve_task_stop` | PVE Task Stop | `destructive` | `Sys.Modify` on `/nodes/{node}` | — | — | Stop a running task (requires confirm=true). This tool is protected: the call is rejected unless confirm=true is passed. Use dry_run=true to preview the effect without executing. |
+| `exec_host` | Exec Host | `exec` | — | — | `host` | Run a shell command on a PVE node host over SSH (requires confirm). This tool is protected: the call is rejected unless confirm=true is passed. |
+| `exec_lxc` | Exec LXC | `exec` | — | — | `lxc` | Run a shell command inside an LXC container via SSH + pct exec (requires confirm). This tool is protected: the call is rejected unless confirm=true is passed. |
+| `exec_pbs` | Exec PBS | `exec` | — | — | `pbs` | Run a shell command on the PBS host over SSH (requires confirm). This tool is protected: the call is rejected unless confirm=true is passed. |
+| `exec_vm` | Exec VM | `exec` | `VM.GuestAgent.Unrestricted` on `/vms/{vmid}` | — | `vm` | Run a shell command inside a QEMU VM through the guest agent (requires confirm). This tool is protected: the call is rejected unless confirm=true is passed. |
+| `pbs_api_call` | PBS API Call | `generic` | — | — | — | Call an arbitrary PBS API endpoint through the token's permissions. |
+| `pve_api_call` | PVE API Call | `generic` | — | — | — | Call an arbitrary PVE API endpoint through the token's permissions. |
 
 ## Service binding
 

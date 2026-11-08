@@ -73,7 +73,7 @@ def test_brand_prefix_is_a_single_word() -> None:
 
 def test_all_tool_names_derive_readable_titles() -> None:
     # Guard against tool-set drift: the catalog must stay complete.
-    assert len(ALL_NAMES) == 74
+    assert len(ALL_NAMES) == 75
     for name in ALL_NAMES:
         title = derive_title(name)
         assert title, name
