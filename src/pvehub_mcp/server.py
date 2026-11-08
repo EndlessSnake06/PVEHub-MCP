@@ -28,11 +28,19 @@ from .clients.ssh import SSHClientPool
 from .config import Settings
 from .errors import InvalidArgument, NotFound, PolicyError, PVEHubError
 from .policy import Category, Policy
+from .toolnaming import derive_title
 from .tools.common import dumps, fail
 
 logger = logging.getLogger(__name__)
 
 __version__ = "0.1.0"
+
+# Stable, greppable notes appended to the description of every tool whose
+# category is in ``safety.require_confirm_for``. The static doc generator
+# (scripts/generate_tool_docs.py) mirrors these strings: it must not import
+# the server, so keep the two copies in sync.
+CONFIRM_NOTE = "This tool is protected: the call is rejected unless confirm=true is passed."
+CONFIRM_DRY_RUN_NOTE = " Use dry_run=true to preview the effect without executing."
 
 
 @dataclass
@@ -40,6 +48,8 @@ class RegisteredTool:
     name: str
     category: Category
     description: str
+    title: str
+    confirm_required: bool
     pve_privileges: tuple[Privilege, ...] = ()
     pbs_privileges: tuple[Privilege, ...] = ()
     shell: str | None = None
@@ -206,17 +216,27 @@ class PVEHub:
         *,
         name: str,
         category: Category,
+        title: str | None = None,
         pve: Sequence[tuple[str, str]] = (),
         pbs: Sequence[tuple[str, str]] = (),
         shell: str | None = None,
         service: str | None = None,
         dry_run: bool = False,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
+        """Register a tool function.
+
+        ``title`` is an optional human-readable display name for the tool.
+        When omitted, the title is derived from ``name`` (``toolnaming``),
+        which produces consistent, readable labels (``pve_guest_delete`` ->
+        ``PVE Guest Delete``) without a per-tool hand-written string.
+        """
+
         def decorator(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             self._register(
                 fn,
                 name=name,
                 category=category,
+                title=title,
                 pve=pve,
                 pbs=pbs,
                 shell=shell,
@@ -233,6 +253,7 @@ class PVEHub:
         *,
         name: str,
         category: Category,
+        title: str | None,
         pve: Sequence[tuple[str, str]],
         pbs: Sequence[tuple[str, str]],
         shell: str | None,
@@ -271,9 +292,16 @@ class PVEHub:
                 logger.info("tool %s blocked: %s", name, reason)
                 return
         wrapped = self._wrap(fn, name=name, category=category, pve=pve_reqs, pbs=pbs_reqs)
+        title_text = (title or "").strip() or derive_title(name)
+        confirm_required = category in self.policy.file.safety.require_confirm_for
         description = (fn.__doc__ or name).strip()
+        if confirm_required:
+            note = CONFIRM_NOTE
+            if "dry_run" in inspect.signature(fn).parameters:
+                note += CONFIRM_DRY_RUN_NOTE
+            description = f"{description}\n\n{note}"
         annotations = ToolAnnotations(
-            title=name,
+            title=title_text,
             readOnlyHint=category == "read",
             destructiveHint=category == "destructive",
             idempotentHint=category in {"read", "generic"},
@@ -282,14 +310,18 @@ class PVEHub:
         self.mcp.add_tool(
             wrapped,
             name=name,
+            title=title_text,
             description=description,
             annotations=annotations,
+            meta={"category": category, "confirm_required": confirm_required},
             structured_output=False,
         )
         self.registered[name] = RegisteredTool(
             name=name,
             category=category,
             description=description,
+            title=title_text,
+            confirm_required=confirm_required,
             pve_privileges=pve_reqs,
             pbs_privileges=pbs_reqs,
             shell=shell,

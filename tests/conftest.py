@@ -258,8 +258,10 @@ class ToolRecorder:
         fn: Callable[..., Awaitable[str]],
         *,
         name: str,
+        title: str | None = None,
         description: str,
         annotations: Any,
+        meta: dict[str, Any] | None = None,
         structured_output: bool,
     ) -> None:
         self.tools[name] = fn
