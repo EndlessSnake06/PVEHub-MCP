@@ -12,6 +12,7 @@ from urllib.parse import quote, unquote
 
 import httpx
 
+from .._version import __version__
 from ..errors import (
     AuthenticationError,
     InvalidArgument,
@@ -99,7 +100,7 @@ class BaseProxmoxClient:
         headers = {
             "Authorization": auth_header,
             "Accept": "application/json",
-            "User-Agent": "pvehub-mcp/0.1.0",
+            "User-Agent": f"pvehub-mcp/{__version__}",
         }
         self._client = httpx.AsyncClient(
             base_url=self.url,

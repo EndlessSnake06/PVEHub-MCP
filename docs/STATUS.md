@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-11-07 (release 0.1.0).
+Last updated: 2026-11-08 (release 0.1.1).
 
 This document separates what was **actually executed** from what is covered by mocks and what
 could not be tested in the build environment. Do not read it as a marketing status page.
