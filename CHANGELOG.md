@@ -5,8 +5,42 @@ versioning: Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Per-client MCP tokens: `PVEHUB_MCP_AUTH_TOKENS` / `mcp_auth_tokens` (D019, issue #21).
+  The legacy `PVEHUB_MCP_AUTH_TOKEN` keeps working (exposed to the middleware under the
+  reserved client name `default`); named tokens add per-client revocation — rotating one
+  client's token no longer logs out the others. The resolved client name is written as
+  `client` into **every** audit entry (ok, denied, error; `unknown` for stdio /
+  unauthenticated loopback). Config validation: 1-32 chars of `[a-z0-9_-]`, `default`
+  reserved, >= 16 chars, and a named token must not equal the legacy token (one secret
+  = one identity).
+- `pvehub_audit_tail` MCP tool (D020, issue #20): tail the audit log in-band —
+  `limit` (1..500), `tool`, `category`, `status`, `client`, `since` (ISO-8601) filters.
+  The underlying `read_audit_tail` reads the last N entries in 64 KiB chunks bounded by
+  an 8 MiB window (a large log never enters memory), skips corrupt lines, and
+  **re-redacts on the way out** — nothing leaves the server unredacted.
+- Audit rotation (D023, issue #19): `PVEHUB_AUDIT_MAX_BYTES` (default 10 MiB) and
+  `PVEHUB_AUDIT_KEEP` (default 5). The active file rotates to `.1`, `.2`, … and the
+  oldest archive is dropped; archives keep `0600`.
+- Audit completeness (D023, issue #18): entries now carry `output_bytes` (size of the
+  redacted response actually returned, every status) and — on `denied`/`error` —
+  `error: {code, message}` with the typed error's own code, so the log distinguishes
+  policy blocks, missing `confirm`, and permission misses.
+- The `pvehub_capabilities` report now includes the audit state: `enabled`, `path`,
+  `size_bytes`, `max_bytes`, `keep` and the **last write error** — a silently stopped
+  audit is one MCP call away from diagnosis. `pvehub_health` reports `enabled`/`path`.
+
 ### Changed
 
+- **Audit schema (breaking for multi-key calls):** `target` now collects **all** present
+  target keys (D023, issue #18). A single key keeps the legacy `key=value` string
+  unchanged; two or more keys are a `{key: "key=value"}` dict. jq pipelines that assume
+  the string form keep working for single-key calls; multi-key calls need `.target
+  | to_entries`.
+- The http transport now starts with `PVEHUB_MCP_AUTH_TOKEN` **or**
+  `PVEHUB_MCP_AUTH_TOKENS` (at least one); the "exactly one token" model is gone (D019,
+  issue #21).
 - The http transport now refuses to start without `PVEHUB_MCP_AUTH_TOKEN` for **any**
   bind address. 0.1.0 only refused non-loopback binds; loopback binds started with an
   unauthenticated `/mcp` (issue #16). `PVEHUB_MCP_AUTH_REQUIRED=false` (new, default
