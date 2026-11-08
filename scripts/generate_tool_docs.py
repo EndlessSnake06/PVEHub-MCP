@@ -230,7 +230,7 @@ def generate(src_dir: Path) -> tuple[str, list[str]]:
         "does not reflect runtime policy or token privileges: a tool listed here may still be",
         "blocked by policy, missing token permissions or missing SSH prerequisites.",
         "",
-        f"Regenerate with `make docs-tools` or `uv run python scripts/generate_tool_docs.py > docs/TOOLS.md`.",
+        "Regenerate with `make docs-tools` or `uv run python scripts/generate_tool_docs.py > docs/TOOLS.md`.",
         "",
         f"**{len(tools)} tools** in {len(with_tools)} of {len(modules)} tool modules.",
         "",
