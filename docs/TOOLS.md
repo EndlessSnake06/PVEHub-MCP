@@ -8,7 +8,7 @@ blocked by policy, missing token permissions or missing SSH prerequisites.
 
 Regenerate with `make docs-tools` or `uv run python scripts/generate_tool_docs.py > docs/TOOLS.md`.
 
-**75 tools** in 19 of 19 tool modules.
+**78 tools** in 20 of 20 tool modules.
 
 | Tool | Title | Category | PVE privilege/path | PBS privilege/path | Shell | Description |
 |---|---|---|---|---|---|---|
@@ -87,6 +87,9 @@ Regenerate with `make docs-tools` or `uv run python scripts/generate_tool_docs.p
 | `exec_vm` | Exec VM | `exec` | `VM.GuestAgent.Unrestricted` on `/vms/{vmid}` | — | `vm` | Run a shell command inside a QEMU VM through the guest agent (requires confirm). This tool is protected: the call is rejected unless confirm=true is passed. |
 | `pbs_api_call` | PBS API Call | `generic` | — | — | — | Call an arbitrary PBS API endpoint through the token's permissions. |
 | `pve_api_call` | PVE API Call | `generic` | — | — | — | Call an arbitrary PVE API endpoint through the token's permissions. |
+| `memory_forget` | Memory Forget | `memory_write` | — | — | — | Delete a memory note by id; requires confirm=true. |
+| `memory_recall` | Memory Recall | `memory` | — | — | — | Search stored notes and the recorded action history for an entity. |
+| `memory_remember` | Memory Remember | `memory_write` | — | — | — | Store a durable note about a guest, node, datastore, cluster, convention or runbook. |
 
 ## Service binding
 

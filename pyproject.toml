@@ -1,6 +1,6 @@
 [project]
 name = "pvehub-mcp"
-version = "0.1.1"
+version = "0.1.2"
 description = "One MCP server for Proxmox VE and Proxmox Backup Server, including SSH/guest-agent shell access"
 readme = "README.md"
 requires-python = ">=3.12"

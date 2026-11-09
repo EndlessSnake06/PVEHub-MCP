@@ -17,6 +17,9 @@ categories:
     - write
     - destructive
     - exec
+    # memory_recall stays available (read_only allows the `memory` category);
+    # remembering and forgetting are writes (D024, issue #34).
+    - memory_write
 
 generic_api:
   # These paths are also hard-denied in policy.py (HARD_DENY_PATHS); listing

@@ -440,3 +440,60 @@ forgery window, which is documented and why strict startup validation exists.
 proxy-less deployments and every existing configuration are unaffected; a
 403-only deployment behind the homelab proxy sets both variables in one
 `config.yaml` edit.
+
+## D025 — Memory layer: SQLite notes + metadata events, split policy categories (issues #31-#39)
+
+**Context:** The server is stateless between sessions, so every client rediscovered the
+same facts (maintenance windows, conventions, "this guest has no agent installed") and
+the action history existed only in the audit log, which is a *security* record: it is
+append-only by rotation, not queryable per subject, and holds redacted arguments rather
+than a usable index. A memory layer had to answer "what do I know about guest 100, and
+what happened to it last" without becoming a second, weaker audit log and without
+turning untrusted text into instructions.
+
+**Decision:**
+
+* **One SQLite file** (`memory_db`, default `<state_dir>/memory.db`), standard-library
+  `sqlite3`, WAL, `busy_timeout`, FTS5 with an automatic `LIKE` fallback. No new
+  service, no new dependency; `PRAGMA user_version` carries the schema version and
+  migrations run idempotently at startup. All access goes through one connection behind
+  an `asyncio.Lock` and `asyncio.to_thread`, so the event loop never blocks on disk.
+* **Two tables with different trust levels.** `notes` holds client-written free text
+  (redacted before write and again on read). `events` holds **metadata only** per
+  mutating call: tool, category, status, instance, client, duration, error code, a
+  static summary built from arguments, and one row per subject. Guest output never
+  enters the table; for `exec` the command is reduced to `command_sha256` (16 hex) and
+  `command_length`. Live state has no schema slot at all.
+* **Two policy categories instead of one**: `memory` (recall, resource, prompt) and
+  `memory_write` (remember, forget). `read_only: true` allows exactly `read`, `generic`,
+  `memory`; a profile can therefore keep recall and enrichment while refusing writes,
+  and `categories.deny: [memory]` remains a valid way to hide the feature entirely.
+  Blocked memory tools are unregistered and listed under `tools.blocked` with the
+  reason — same contract as every other tool.
+* **Enrichment is opt-in per call, not a second tool.** A successful result whose
+  arguments name a subject (vmid, node, datastore, path) gets a `_memory` block with
+  `trust: "untrusted-data"`, capped by `memory_enrich_max_bytes` and by a quarter of
+  `max_output_bytes`. It never runs on errors, never on `memory_*` tools, and any
+  failure returns the original response unchanged (fail-open). The cap exists so a
+  memory block can never push `data` out of the output budget.
+* **Retention is a cleanup job, not a TTL daemon**: TTL per note (`expires_in_days`),
+  soft delete with a tombstone window, then purge; global retention in days, an event
+  retention window and a hard `memory_max_notes` cap. Runs at startup and then
+  periodically (`memory_cleanup_interval_seconds`, `0` disables); every run is reported
+  in `pvehub_capabilities` including failures.
+* **A disabled store is a reported state, not a crash.** An unwritable path (read-only
+  rootfs, unmounted volume, wrong owner) leaves `memory.enabled=false` + `memory.error`
+  in the capabilities report and blocks the memory tools with that reason.
+* **MCP resource `memory://notes` and prompt `memory_briefing`** are read-only views:
+  the resource returns data with the trust marker, the prompt contains instructions for
+  the client but never note content. Both vanish when the category or the store is
+  disabled (issue #37, no SDK hack required).
+
+**Consequences:** Clients keep a durable, queryable context per subject; operators get a
+per-subject action history that is *not* the audit log and cannot be mistaken for one,
+because it contains no payloads. The database is a second state file next to
+`audit.jsonl`, so backups must include both (and `memory.db` must be copied with the
+SQLite backup API, not a bare `cp` while WAL is active). Free-text notes remain the one
+place where untrusted input is stored; every consumer is told, in-band, that `_memory`
+is data. Migrations are additive (`user_version`), so an upgrade keeps existing notes
+and an old `policy.yaml` without the new categories keeps loading unchanged.

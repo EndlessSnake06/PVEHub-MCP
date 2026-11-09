@@ -253,7 +253,7 @@ class Settings(BaseModel):
     wait_default: bool = True
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
-    # -- memory layer (epic #31, D024) -----------------------------------
+    # -- memory layer (epic #31, D025) -----------------------------------
     #: SQLite memory store; ``memory_db`` defaults to ``<state_dir>/memory.db``
     #: so that ``PVEHUB_STATE_DIR`` moves the database with the audit log.
     memory_enabled: bool = True
