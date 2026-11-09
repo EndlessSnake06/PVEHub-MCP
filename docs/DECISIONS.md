@@ -506,9 +506,9 @@ problems follow: (1) every action in PVE and in the audit is attributed to the s
 account, not to the human who issued the request, so the per-client audit attribution of
 D019 stops at the MCP boundary; (2) the operator must provision a powerful service
 token for the server to do anything, which is exactly the standing privilege a
-compromised server would inherit; (3) issue #7 left PBS in passthrough undecidable,
-because a PVE API token and a PBS credential are different things and the single
-configured token conflated them.
+compromised server would inherit; (3) PBS in passthrough was undecidable, because a PVE
+API token and a PBS credential are different things and the single configured token
+conflated them.
 
 **Decision:** Add an opt-in `mcp_auth_mode: "passthrough"`. In this mode the MCP bearer
 is not a server token at all — it is the *requesting client's own PVE API token*, and
@@ -551,7 +551,7 @@ the server uses it as the credential for every PVE call of that request.
   `AuthenticationError` rather than falling back to the configured service token.
   `PVEHub.pbs()` raises `AuthenticationError` in passthrough mode, because a PVE API
   token is not a PBS credential.
-* **PBS is out of scope for passthrough (closes issue #7).** A PVE API token is not
+* **PBS is out of scope for passthrough.** A PVE API token is not
   valid on the PBS API, and the only credential a passthrough request carries is a PVE
   token. So *no* PBS tool is registered in passthrough mode: each is blocked at
   registration with the reason `passthrough: PVE API tokens are not valid on the PBS
@@ -573,7 +573,7 @@ identity end to end; the server holds no standing PVE privilege of its own in
 passthrough mode — a compromised server can do exactly what the *current request's*
 token allows, and nothing more. The cost is that every distinct PVE token is validated
 once (cached, bounded, TTL) and that PBS is unavailable in this mode (a deliberate
-trade, documented here as the resolution of issue #7). Static mode is byte-for-byte
+trade, recorded here as part of D026). Static mode is byte-for-byte
 unchanged and remains the default; passthrough is strictly opt-in and config-validated,
 so an existing deployment is unaffected by upgrading. The `pve_token` audit field adds
 one more identity to the redacted entry; the secret is never written, and the existing

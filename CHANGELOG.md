@@ -42,7 +42,7 @@ versioning: Semantic Versioning.
 
 ### Changed
 
-- **PBS is not available in passthrough mode (closes issue #7).** A PVE API token is
+- **PBS is not available in passthrough mode.** A PVE API token is
   not a valid PBS credential, so no PBS tool is registered in passthrough mode: each is
   blocked at registration with the reason
   `passthrough: PVE API tokens are not valid on the PBS API (run in static mode for PBS

@@ -128,7 +128,7 @@ never used in this mode (fail-closed).
   `check_pve_token_snapshot` gate runs against the token's own snapshot (fail-open /
   fail-closed per `capabilities_fail_open`), and PVE enforces the caller's ACL on every
   call regardless.
-* **PBS is out of scope (closes issue #7).** A PVE API token is not a PBS credential, and
+* **PBS is out of scope.** A PVE API token is not a PBS credential, and
   the only credential a passthrough request carries is a PVE token, so no PBS tool is
   registered in this mode (blocked at registration, reported under `tools.blocked`).
   Static mode remains the only way to reach PBS.
