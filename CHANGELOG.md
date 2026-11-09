@@ -3,6 +3,61 @@
 All notable changes to this project are documented here. Format: Keep a Changelog;
 versioning: Semantic Versioning.
 
+## [0.1.3] — 2026-11-09
+
+### Added
+
+- **Bearer pass-through: the MCP bearer *is* the PVE API token (D026, issue #30).**
+  A new opt-in `mcp_auth_mode: "passthrough"` (`PVEHUB_MCP_AUTH_MODE`) makes the
+  `Authorization: Bearer` value the requesting client's **own PVE API token**, used as
+  the credential for every PVE call of that request. The configured PVE service token is
+  **not** used in this mode (fail-closed).
+  - Structural validation at the edge: `PassthroughBearerMiddleware` replaces the
+    named-token middleware for `/mcp` and `/ready` and rejects any bearer that is not a
+    well-formed PVE API token (`user@realm!tokenid=<secret>`, secret ≥ 16 chars) with a
+    `401`.
+  - Per-request, per-instance validation against `GET /access/permissions`, cached in a
+    bounded TTL `TokenValidationCache` keyed by the **full** token identity (user,
+    realm, token-id **and** secret), so a rotated secret re-validates immediately and
+    two clients never share a validated state or a permission snapshot. A `401` fails
+    the call with a clear `AuthenticationError` (no fallback to the configured token);
+    a `403` (valid but lacking `Sys.Audit`) is trusted and recorded as a discovery
+    failure — PVE enforces every call per call.
+  - The per-request client is scoped via a request-local context channel;
+    `PVEHub.pve()` hands out the per-request client and is fail-closed (raises
+    `AuthenticationError` with no validated token instead of falling back to the
+    configured service token). `PVEHub.pbs()` raises `AuthenticationError` in
+    passthrough mode.
+  - Per-token capability gate at call time (`check_pve_token_snapshot`) — the request's
+    token is unknown at registration, so visibility is no longer permission-filtered;
+    the call-time gate and PVE's own ACL are the security boundary.
+  - A new `pve_token` field in the audit log records the token **identity**
+    (`user@realm!tokenid`) — never the secret; `client` stays `unknown` in this mode.
+    The existing secret-redaction applies.
+  - `pvehub_capabilities` reports an `auth` block (`mode`, `required`, and
+    `token_validation_ttl` in passthrough) so the mode is visible.
+  - New settings (all optional, defaults in `docs/CONFIGURATION.md`):
+    `mcp_auth_mode` (`PVEHUB_MCP_AUTH_MODE`) and `mcp_token_validation_ttl`
+    (`PVEHUB_MCP_TOKEN_VALIDATION_TTL`, default `60`, minimum `1`).
+
+### Changed
+
+- **PBS is not available in passthrough mode (closes issue #7).** A PVE API token is
+  not a valid PBS credential, so no PBS tool is registered in passthrough mode: each is
+  blocked at registration with the reason
+  `passthrough: PVE API tokens are not valid on the PBS API (run in static mode for PBS
+  access)`, reported under `tools.blocked`. Static mode is unchanged and remains the
+  only way to reach PBS.
+- Tool registration in passthrough mode no longer permission-filters PVE tool visibility
+  (the per-token gate moved to call time). Static mode is unaffected.
+
+### Notes
+
+- Static mode (the default) is byte-for-byte unchanged; passthrough is strictly opt-in
+  and config-validated (requires a PVE instance, `transport: http`,
+  `mcp_auth_required: true`, `mcp_token_validation_ttl >= 1`), so an existing
+  deployment is unaffected by upgrading. See `docs/DECISIONS.md` D026.
+
 ## [0.1.2] — 2026-11-09
 
 ### Added

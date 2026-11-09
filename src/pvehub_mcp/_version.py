@@ -6,4 +6,4 @@ dependency-free module so both ``server`` and ``clients.base`` can import it wit
 circular import through the package ``__init__``.
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"

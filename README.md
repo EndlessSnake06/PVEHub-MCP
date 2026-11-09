@@ -3,7 +3,7 @@
 One MCP server for **Proxmox VE** and **Proxmox Backup Server**, plus shell access to PVE
 hosts, LXC containers, QEMU VMs (guest agent) and the PBS host.
 
-> Status: `0.1.2` — core server, policy engine, curated PVE/PBS/exec tools and packaging are
+> Status: `0.1.3` — core server, policy engine, curated PVE/PBS/exec tools and packaging are
 > implemented. `docs/TOOLS.md` is generated from the code and shows exactly what exists today;
 > `docs/STATUS.md` separates live-verified, mocked and untested behaviour.
 
@@ -91,6 +91,22 @@ development setups only (warning logged at startup). Or **stdio** when started
 with `--transport stdio` / `PVEHUB_TRANSPORT=stdio` (no listener, no bearer
 token).
 
+### Bearer pass-through (D026, issue #30)
+
+In the default (`static`) mode the server authenticates clients with named MCP
+tokens and calls PVE with one configured service token. With
+`PVEHUB_MCP_AUTH_MODE=passthrough` (opt-in) that flips: the
+`Authorization: Bearer` value **is** the client's own PVE API token
+(`user@realm!tokenid=<secret>`), and the server uses it as the credential for
+every PVE call of that request — no configured service token, fail-closed. The
+token is validated once per request-identity against the PVE API (cached, TTL),
+PVE keeps enforcing the caller's own ACL per call, and the audit log records the
+token **identity** (never the secret) in a `pve_token` field. PBS tools are not
+registered in this mode (a PVE API token is not a PBS credential; run static
+mode for PBS). It requires a PVE instance, the `http` transport,
+`PVEHUB_MCP_AUTH_REQUIRED=true`, and `PVEHUB_MCP_TOKEN_VALIDATION_TTL >= 1`.
+See `docs/DECISIONS.md` D026 and `docs/CONFIGURATION.md`.
+
 ### Claude Code / generic HTTP client
 
 ```bash
@@ -128,7 +144,7 @@ Claude Desktop launches stdio servers itself. Run the same image with `-i` and n
         "-v", "/Users/you/pvehub/config:/config:ro",
         "-v", "/Users/you/pvehub/ssh:/ssh:ro",
         "-v", "pvehub-data:/data",
-        "pvehub-mcp:0.1.2"
+        "pvehub-mcp:0.1.3"
       ]
     }
   }
@@ -307,7 +323,7 @@ read-only `/data` disables the layer with a reported reason instead of failing t
 make install        # uv sync --extra dev
 make check          # ruff + mypy + pytest
 make docs-tools     # regenerate docs/TOOLS.md from @hub.tool declarations
-make docker-build   # docker build -t pvehub-mcp:0.1.2 .
+make docker-build   # docker build -t pvehub-mcp:0.1.3 .
 ```
 
 The Docker image is built by CI (`.gitea/workflows/ci.yml`); the development sandbox has

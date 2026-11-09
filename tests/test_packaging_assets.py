@@ -72,7 +72,7 @@ def test_admin_policy_allows_destructive_but_not_console_tickets() -> None:
 def test_compose_service_contract() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     service = compose["services"]["pvehub-mcp"]
-    assert service["image"] == "pvehub-mcp:0.1.2"
+    assert service["image"] == "pvehub-mcp:0.1.3"
     assert service["build"]["context"] == "."
     assert service["env_file"] == [".env"]
     assert service["ports"] == ["8080:8080"]

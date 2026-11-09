@@ -13,7 +13,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: pvehub-mcp:0.1.2
+    image: pvehub-mcp:0.1.3
     env_file:
       - .env
     ports:

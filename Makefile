@@ -46,7 +46,7 @@ run-stdio:
 	PVEHUB_TRANSPORT=stdio $(UV) run pvehub-mcp
 
 docker-build:
-	docker build -t pvehub-mcp:0.1.2 .
+	docker build -t pvehub-mcp:0.1.3 .
 
 docker-up:
 	docker compose up -d --build

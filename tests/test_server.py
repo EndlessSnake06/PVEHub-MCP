@@ -205,7 +205,7 @@ async def test_http_health_and_bearer_auth() -> None:
             assert ready.status_code == 200
             ready_body = ready.json()
             assert ready_body["status"] == "ok"
-            assert ready_body["version"] == "0.1.2"
+            assert ready_body["version"] == "0.1.3"
             assert "tools" in ready_body
 
             # MCP endpoint: bearer auth unchanged.

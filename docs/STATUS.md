@@ -1,11 +1,16 @@
 # Status
 
-Last updated: 2026-11-09 (release 0.1.2).
+Last updated: 2026-11-09 (release 0.1.3).
 
 Release 0.1.2 (memory layer) was verified in the same sandbox as 0.1.1: no Docker daemon,
 no PVE/PBS tokens, no SSH key. Everything below that is marked live-verified was re-run for
 this release with the commands named; everything memory-related is covered by FTS5-enabled
 in-process SQLite tests, not by a container with a real volume.
+
+Release 0.1.3 (bearer pass-through, D026 / issue #30) was verified in the same sandbox: no
+PVE API token is supplied, so the pass-through's PVE round-trip (`GET /access/permissions`)
+is covered by unit/contract tests with `httpx` `MockTransport`, not against a live PVE. The
+static (default) mode is unchanged and its prior evidence stands.
 
 This document separates what was **actually executed** from what is covered by mocks and what
 could not be tested in the build environment. Do not read it as a marketing status page.
@@ -32,7 +37,7 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
 | Python package install | `uv sync --extra dev` |
 | Lint | `uv run ruff check src tests` — clean |
 | Typecheck | `uv run mypy src` — clean |
-| Unit/contract tests | `make check` (ruff + mypy + pytest) — **452 passed, 2 skipped** (integration) |
+| Unit/contract tests | `make check` (ruff + mypy + pytest) — **503 passed, 2 skipped** (integration) on 0.1.3 (was 452 on 0.1.2) |
 | HTTP transport | local uvicorn start, `GET /health` → 200 JSON, `POST /mcp` without token → 401, with token → MCP `initialize` result |
 | stdio transport (0.1.2) | real subprocess + MCP client: `initialize` -> `pvehub-mcp 0.1.2`, `tools/list`, `pvehub_capabilities`, `read_resource memory://notes`, `list_prompts` |
 | Memory over stdio (0.1.2) | readonly policy: 34 tools, only `memory_recall` of the memory tools, resource + prompt present, `memory.db` mode `0600`; operator policy: `memory_remember` -> `memory_recall` (secret redacted to `***`) -> `memory_forget` without `confirm` -> `confirm_required` -> with `confirm` -> `deleted: true` |
@@ -52,6 +57,7 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
 | CI test gate | Gitea Actions run 2681: `250 passed, 2 skipped` on the runner |
 | Compose runtime smoke | Gitea Actions compose job: `docker compose config`, `docker compose up -d --build`, `/health` 200 inside the container, `docker compose down -v`; policy `readonly.yaml` loaded |
 | Trusted proxy (D024, issue #25) | `tests/test_trusted_proxy.py` — real uvicorn (`proxy_headers=False`) + full MCP session: `X-Forwarded-For` chain behind a trusted `127.0.0.1/32` peer resolves the client IP into the audit (`client_ip`), untrusted peers get 403 before authentication, `/health` stays 200, and the default configuration ignores a forged header (socket peer logged). 379 passed at merge; **452 passed** with the memory layer; `ruff` + `mypy` clean |
+| Bearer pass-through (D026, issue #30) | `tests/test_passthrough.py` — 51 unit/contract tests: structural `parse_pve_bearer` (valid/invalid shapes), `PassthroughBearerMiddleware` 401 on non-PVE bearers at the edge, per-(instance, full-token-identity) `TokenValidationCache` (TTL expiry, secret rotation = new key, bounded eviction returns clients for closing), `validate_pve_token` 200→snapshot / 401→`AuthenticationError` (no fallback) / 403→trusted+discovery-failure (all against an `httpx` `MockTransport` of `GET /access/permissions`), scoped-context isolation (two concurrent requests, no cross-talk, no configured-token fallback via `PVEHub.pve()`), `PVEHub.pbs()` `AuthenticationError` in passthrough, PBS tools blocked at registration with the documented reason, per-token call-time gate, and the `pve_token` audit field (identity only, secret redacted, `client` stays `unknown`). **503 passed** total; `ruff` + `mypy` clean |
 
 ## Mocked only
 
@@ -62,6 +68,10 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
 - Audit file writes (temp files) and redaction edge cases.
 - All memory-layer database work: the tests use temporary SQLite files inside the sandbox,
   not the `/data` volume of a running container.
+- Bearer pass-through (D026, issue #30): the PVE token-validation round-trip
+  (`GET /access/permissions`) and the per-request PVE client are exercised with `httpx`
+  `MockTransport` and in-process fakes, not against a live PVE (no API token in the
+  sandbox).
 
 ## Not tested
 
@@ -71,6 +81,9 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
 - Healthcheck transition from `starting` to `healthy` — the smoke asserted `/health` 200 inside
   the container, not Docker's health status after the 30 s start period.
 - Live PVE/PBS permission discovery with a real token.
+- Live bearer pass-through (D026, issue #30) end to end: a real per-client PVE token
+  validating against a live PVE and the per-request call actually running under that token's
+  own ACL (the sandbox has no PVE API token; the PVE round-trip is `MockTransport`-covered).
 - Real SSH host-key verification and `pct exec` on a node.
 - Behaviour against PBS versions older than the test server's API schema.
 - Memory layer inside the hardened container: `/data` volume ownership (UID 10001), the
@@ -95,6 +108,10 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
   registered for endpoints verified in the server's `apidoc.js`.
 - Capability pre-checks model AND-requirements only. Tokens holding an equivalent alternative
   privilege may see a tool hidden; PVE/PBS remain the enforcement point (review finding F-11).
+- In bearer pass-through mode (D026, issue #30) no PBS tool is registered: a PVE API token is
+  not a valid PBS credential, and the only credential a pass-through request carries is a PVE
+  token. Run static mode (the default) for PBS access; the block is reported under
+  `tools.blocked`.
 - Upstream responses are parsed in full before the output limit is applied; `wait` timeouts are
   not capped. Impact is self-DoS by a trusted upstream (review finding F-12).
 - No OAuth/OIDC for the MCP endpoint; a static bearer token is used. Put it behind a TLS
