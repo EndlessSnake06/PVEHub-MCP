@@ -65,7 +65,27 @@ def main(argv: list[str] | None = None) -> int:
 
     if settings.transport == "http":
         app = build_http_app(hub)
-        uvicorn.run(app, host=settings.host, port=settings.port, log_level=settings.log_level.lower())
+        if settings.trusted_proxies or settings.require_trusted_proxy:
+            logging.info(
+                "trusted proxy active: networks=%s require_trusted_proxy=%s "
+                "(forwarded headers handled explicitly by the server, D024/#25)",
+                ",".join(settings.trusted_proxies),
+                settings.require_trusted_proxy,
+            )
+        # proxy_headers=False (D024, issue #25): the trusted-proxy policy is
+        # implemented explicitly by the server (403 gate + rightmost-untrusted
+        # XFF resolution).  Leaving uvicorn's implicit X-Forwarded-For /
+        # Forwarded handling on would create a second, different policy layer
+        # (FORWARDED_ALLOW_IPS, last-entry semantics) whose results could
+        # diverge from the audit attribution — and its default 127.0.0.1
+        # trust is a hidden implicit assumption.
+        uvicorn.run(
+            app,
+            host=settings.host,
+            port=settings.port,
+            log_level=settings.log_level.lower(),
+            proxy_headers=False,
+        )
         return 0
 
     async def run_stdio() -> None:
