@@ -80,6 +80,8 @@ PBS instance.
 | `PVEHUB_MCP_AUTH_TOKENS` | unset | Per-client named tokens for audit attribution (D019, issue #21): `name:token,name2:token2`. Name 1-32 chars of `[a-z0-9_-]` (letter/digit first), `default` reserved, token >= 16 chars, must not equal `PVEHUB_MCP_AUTH_TOKEN`. The resolved name is written as `client` into every audit entry; rotating one client's token does not affect the others | **yes** |
 | `PVEHUB_MCP_AUTH_REQUIRED` | `true` | When `true` (default), the http transport refuses to start without `PVEHUB_MCP_AUTH_TOKEN` **or** `PVEHUB_MCP_AUTH_TOKENS`. `false` allows an unauthenticated `/mcp` on loopback binds only (development); non-loopback binds stay refused | no |
 | `PVEHUB_ALLOWED_HOSTS` | empty | Comma-separated `Host`/`Origin` allowlist; enables DNS-rebinding protection. Empty disables that protection | no |
+| `PVEHUB_TRUSTED_PROXIES` | empty | Comma-separated CIDRs (or bare IPs; a bare IP becomes `/32` or `/128`) naming the trusted reverse proxies (D024, issue #25). Empty: `X-Forwarded-For` is **never consulted** and the socket peer is logged. A malformed entry fails startup (fail-loud) | no |
+| `PVEHUB_REQUIRE_TRUSTED_PROXY` | `false` | When `true`, requests to `/mcp` and `/ready` from a peer **outside** `PVEHUB_TRUSTED_PROXIES` get `403` before any authentication (D024, issue #25). Requires a non-empty trust set (validated at startup). `GET /health` stays exempt so the container healthcheck keeps working | no |
 | `PVEHUB_POLICY_FILE` | `/config/policy.yaml` | Path to the policy YAML | no |
 | `PVEHUB_AUDIT_LOG` | `/data/audit.jsonl` | JSONL audit path. Disable with YAML `audit_log: null`; an empty env value is ignored | no |
 | `PVEHUB_AUDIT_INCLUDE_RESULTS` | `false` | Also log tool result bodies (can contain secrets) | no |
@@ -173,6 +175,13 @@ mcp_auth_tokens:                # optional, per-client (D019, issue #21);
   webui: ${PVEHUB_WEBUI_TOKEN}  #   rotating webui does not log out the others
 mcp_auth_required: true        # false: unauthenticated /mcp, loopback dev setups only
 allowed_hosts: ["pvehub.example.com", "192.168.1.20:8080"]
+# Trusted reverse proxies (D024, issue #25): only if the socket peer is inside
+# this set is X-Forwarded-For consulted for the client_ip audit field. A bare
+# IP is a /32. Malformed entries fail startup.
+trusted_proxies: ["10.200.0.0/16"]
+# true: 403 on /mcp and /ready for peers outside trusted_proxies (before auth).
+# Requires a non-empty trusted_proxies. /health stays exempt (D021).
+require_trusted_proxy: false
 
 pve:
   - name: pve1
@@ -240,6 +249,8 @@ allow_insecure_http: false
 | `mcp_auth_tokens` | map[name] (secret) | unset | per-client named tokens (D019, issue #21); resolved name is written as `client` into every audit entry |
 | `mcp_auth_required` | bool | `true` | http transport refuses to start without `mcp_auth_token` **or** `mcp_auth_tokens`; `false` = unauthenticated loopback development only, non-loopback stays refused |
 | `allowed_hosts` | list[str] | `[]` | enables DNS-rebinding protection; must contain the hostnames clients use |
+| `trusted_proxies` | list[str] | `[]` | trusted reverse proxies, CIDRs or bare IPs (bare IP = `/32`/`/128`) (D024, issue #25); malformed entries fail startup. Empty: `X-Forwarded-For` is never consulted, the socket peer is logged |
+| `require_trusted_proxy` | bool | `false` | 403 gate on `/mcp` and `/ready` for peers outside `trusted_proxies`, before authentication; requires a non-empty `trusted_proxies`; `/health` exempt (D021, D024) |
 | `pve` | list[instance] | `[]` | at least one PVE or PBS instance required |
 | `pbs` | list[instance] | `[]` | |
 | `ssh` | mapping | see below | optional; without it host/LXC/file tools stay hidden |
@@ -428,7 +439,7 @@ tools exist in the current tree.
 call:
 
 ```json
-{"ts":"2026-11-07T10:00:00Z","tool":"pve_api_call","category":"generic","status":"ok","instance":"pve1","client":"webui","target":"path=/nodes","params":{"path":"/nodes"},"duration_ms":42,"output_bytes":512}
+{"ts":"2026-11-07T10:00:00Z","tool":"pve_api_call","category":"generic","status":"ok","instance":"pve1","client":"webui","client_ip":"192.168.1.50","target":"path=/nodes","params":{"path":"/nodes"},"duration_ms":42,"output_bytes":512}
 ```
 
 - `status` is `ok`, `denied` (policy/confirm) or `error`.
@@ -436,6 +447,12 @@ call:
   of a `PVEHUB_MCP_AUTH_TOKENS` entry, `default` for the legacy token, or `unknown`
   for stdio / unauthenticated loopback. The field is always present, so log consumers
   can rely on the schema.
+- `client_ip` is the resolved source address (D024, issue #25): when the socket peer
+  is a configured trusted proxy, the client resolved from `X-Forwarded-For` (the
+  rightmost entry *outside* the trusted set — a forged entry cannot change the
+  outcome for an untrusted peer, for whom the socket peer is logged); otherwise the
+  socket peer. Always present; `unknown` when no address is resolvable. See
+  `docs/DECISIONS.md` D024 for the trust model and the forgery rules.
 - `target` keeps the legacy single-key `key=value` string for one key; with two or
   more target keys it is a `{key: "key=value"}` dict so no targeting is lost (D023,
   issue #18). Every value is redacted the same way as everything else.
@@ -475,6 +492,59 @@ maps the token's effective privileges onto the declared tool requirements
   `Sys.Audit`, `VM.Audit`; PBS `Datastore.Audit`, `Sys.Audit`. For guest exec/files:
   PVE `VM.GuestAgent.Unrestricted`, `VM.GuestAgent.FileRead`, `VM.GuestAgent.FileWrite`,
   `VM.GuestAgent.Audit`.
+
+## Reverse proxy (trusted proxies, D024, issue #25)
+
+When the server sits behind a reverse proxy (Caddy, Traefik, nginx), the
+socket peer of every request is the proxy. Two settings control what the
+server does with that (see `docs/DECISIONS.md` D024):
+
+* `trusted_proxies` (`PVEHUB_TRUSTED_PROXIES`): the proxy's network(s), as
+  CIDRs. A bare IP is a /32. Only for a peer inside this set is
+  `X-Forwarded-For` consulted to resolve the client address written as
+  `client_ip` into the audit log; for every other peer the socket address
+  is logged — a forged header can never change that.
+* `require_trusted_proxy` (`PVEHUB_REQUIRE_TRUSTED_PROXY`, default
+  `false`): `403` on `/mcp` and `/ready` for any peer outside the set,
+  **before** authentication. This is how you close the compose port
+  (`"8080:8080"`) to direct, non-proxy access. `GET /health` stays exempt
+  (container healthchecks).
+
+Caddy example (the proxy terminates TLS; the server behind it is plain
+HTTP on the compose network, and forwards the real client):
+
+```caddy
+pvehub.example.com {
+    tls internal
+    reverse_proxy pvehub:8080 {
+        # Caddy adds the client to X-Forwarded-For (it does not replace an
+        # existing chain). The server resolves the client as the rightmost
+        # entry outside trusted_proxies.
+    }
+}
+```
+
+```yaml
+# config.yaml — the proxy's compose network, nothing wider
+trusted_proxies: ["172.18.0.0/16"]
+require_trusted_proxy: true
+```
+
+**Interaction with `allowed_hosts` (DNS-rebinding protection):** the SDK
+checks the `Host` header of every `/mcp` request. A proxy that *rewrites*
+`Host` to the upstream address (some do this by default) therefore breaks
+the allowlist — requests are rejected with a transport-security error.
+Keep the external hostname as the forwarded `Host` and list that hostname
+in `PVEHUB_ALLOWED_HOSTS`; do not add internal addresses to the allowlist
+to make a Host-rewriting proxy work.
+
+**Forwarded headers and `proxy_headers`:** the server runs uvicorn with
+`proxy_headers=False` on purpose — the forwarded-header policy is explicit
+(403 gate + rightmost-untrusted resolution in `pvehub_mcp/proxy.py`), not
+the framework's implicit one (whose default `forwarded_allow_ips=127.0.0.1`
+is exactly the silent pitfall this setting replaces: a proxy on a bridge
+IP would be ignored by the implicit policy). `X-Forwarded-Proto` is not
+read; TLS termination belongs to the proxy.
 
 ## Container notes
 

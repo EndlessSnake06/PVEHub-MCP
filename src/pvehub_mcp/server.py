@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import inspect
 import json
 import logging
@@ -12,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.context import Context
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from starlette.applications import Starlette
@@ -29,6 +29,7 @@ from .clients.ssh import SSHClientPool
 from .config import Settings
 from .errors import InvalidArgument, NotFound, PolicyError, PVEHubError
 from .policy import Category, Policy
+from .proxy import is_trusted, parse_trusted_proxies, resolve_client_ip
 from .toolnaming import derive_title
 from .tools.common import dumps, fail
 
@@ -66,6 +67,10 @@ class PVEHub:
 
     def __init__(self, settings: Settings, policy: Policy | None = None) -> None:
         self.settings = settings
+        # D024 (issue #25): the trusted-proxy set is parsed once here —
+        # config validation guarantees it is valid (or empty) by the time
+        # Settings is constructed, so this cannot fail.
+        self._trusted_nets = parse_trusted_proxies(",".join(settings.trusted_proxies))
         self.policy = policy or Policy.load(settings.policy_file)
         self.audit = AuditLogger(
             settings.audit_log,
@@ -375,8 +380,14 @@ class PVEHub:
         pve: tuple[Privilege, ...],
         pbs: tuple[Privilege, ...],
     ) -> Callable[..., Awaitable[Any]]:
-        @functools.wraps(fn)
-        async def wrapper(**kwargs: Any) -> str:
+        # functools.wraps() is deliberately NOT used: it would copy fn's
+        # __annotations__ over this wrapper's ``ctx: Context | None``
+        # signature and silently disable the SDK's Context injection (the
+        # SDK resolves injectable parameters through
+        # typing.get_type_hints(), which follows __wrapped__ into the
+        # original function — see the comment below the __annotations__
+        # assignment for the full mechanics).
+        async def wrapper(ctx: Context | None = None, **kwargs: Any) -> str:
             started = __import__("time").monotonic()
             instance = kwargs.get("instance")
             target = _target(kwargs)
@@ -423,6 +434,10 @@ class PVEHub:
                 return response
             finally:
                 duration = int((__import__("time").monotonic() - started) * 1000)
+                # D024 (issue #25): resolve the client address through the
+                # trusted-proxy rules; "unknown" when not resolvable, like
+                # the client name above (stdio, missing socket peer).
+                client_ip = _client_ip(ctx, self._trusted_nets)
                 await self.audit.write(
                     tool=name,
                     category=category,
@@ -435,7 +450,30 @@ class PVEHub:
                     error=error,
                     result=response,
                     client=client,
+                    client_ip=client_ip,
                 )
+
+        # The SDK locates the injectable parameter via
+        # typing.get_type_hints(), which for string annotations follows
+        # __wrapped__ to the ORIGINAL function and evaluates the string in
+        # that function's module (pvehub_mcp.tools.*) — "Context" is not
+        # imported there, so the string would raise NameError and the
+        # injection would silently disable.  The real type object needs no
+        # evaluation and is passed through verbatim.  The unsubscripted
+        # class must stay in the annotation: a parametrized generic
+        # (Context[Any, Any]) would not match the SDK's isclass()/
+        # issubclass() check.
+        wrapper.__name__ = fn.__name__
+        wrapper.__qualname__ = fn.__qualname__
+        wrapper.__module__ = fn.__module__
+        wrapper.__doc__ = fn.__doc__
+        wrapper.__annotations__ = {"ctx": Context | None, "kwargs": Any, "return": str}
+        # func_metadata() derives the input schema through
+        # inspect.signature(), which follows __wrapped__ to the original
+        # function — the tool schema therefore stays identical to before.
+        # (setattr: the mypy model of a function type has no __wrapped__
+        # attribute; the SDK's schema derivation needs it at runtime.)
+        setattr(wrapper, "__wrapped__", fn)  # noqa: B010
 
         return wrapper
 
@@ -598,6 +636,98 @@ class BearerAuthMiddleware:
             client_context.reset(token)
 
 
+class TrustedProxyMiddleware:
+    """Reject direct (non-proxy) access to the protected MCP routes (D024).
+
+    Only active when ``require_trusted_proxy`` is set; with the default
+    configuration this middleware does nothing and the behaviour is
+    unchanged.  It runs **outside** the bearer middleware (installed
+    second), so a direct request from an untrusted network gets a 403
+    *before* any 401.  ``/health`` is deliberately exempt: the container
+    healthcheck may probe from the bridge network and must not be turned
+    into a failed container — liveness without a token is acceptable (no
+    secret is exposed), readiness on ``/ready`` stays protected.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        networks: tuple[Any, ...],
+        *,
+        require: bool,
+        protected_prefix: str = "/mcp",
+        protected_paths: frozenset[str] = frozenset(),
+    ) -> None:
+        self.app = app
+        self.networks = networks
+        self.require = require
+        self.protected_prefix = protected_prefix
+        self.protected_paths = protected_paths
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if not self.require or scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if not (path.startswith(self.protected_prefix) or path in self.protected_paths):
+            await self.app(scope, receive, send)
+            return
+        client = scope.get("client")
+        peer = client[0] if client else ""
+        if peer and is_trusted(peer, self.networks):
+            await self.app(scope, receive, send)
+            return
+        # No client in the scope (some test harnesses) or an untrusted
+        # peer: the 403 is the documented contract for both — without a
+        # verifiable socket peer we cannot trust anything.
+        response = JSONResponse(
+            {
+                "error": "proxy_required",
+                "message": "this endpoint is only reachable via a configured "
+                "trusted proxy (PVEHUB_TRUSTED_PROXIES)",
+            },
+            status_code=403,
+        )
+        await response(scope, receive, send)
+
+
+def _raw_request(ctx: Context | None) -> Request | None:
+    """Extract the raw starlette request from the injected MCP context.
+
+    The MCP SDK attaches the per-message HTTP request to the request
+    context (``ServerRequestContext.request``) for both the legacy and the
+    modern streamable-http path — this is the only channel that reaches the
+    tool call even when the SDK runs the call in a task that is not the
+    middleware task (where a ContextVar set by middleware would be lost).
+    Returns ``None`` outside of an HTTP request (stdio transport, or an SDK
+    version whose request context has no raw request attached).
+    """
+    if ctx is None:
+        return None
+    try:
+        request_context = ctx.request_context
+    except (ValueError, AttributeError):
+        return None
+    request = getattr(request_context, "request", None)
+    return request if isinstance(request, Request) else None
+
+
+def _client_ip(ctx: Context | None, trusted_nets: tuple[Any, ...]) -> str | None:
+    """Resolve the client address for audit attribution (D024, issue #25).
+
+    Applies the trusted-proxy rules from :mod:`pvehub_mcp.proxy`; returns
+    ``None`` (→ "unknown" in the audit entry) when the request cannot be
+    resolved — stdio transport, or an ASGI scope without a socket client.
+    """
+    request = _raw_request(ctx)
+    if request is None:
+        return None
+    peer = request.client.host if request.client is not None else ""
+    if not peer:
+        return None
+    return resolve_client_ip(peer, request.headers.get("x-forwarded-for"), trusted_nets)
+
+
 def _transport_security(settings: Settings) -> TransportSecuritySettings:
     """Build DNS-rebinding settings.
 
@@ -672,6 +802,17 @@ def build_http_app(hub: PVEHub) -> Starlette:
         logger.warning(
             "MCP endpoint /mcp is UNAUTHENTICATED (mcp_auth_required=false); "
             "loopback development setups only - do not expose this port"
+        )
+    # D024 (issue #25): the trusted-proxy gate is installed *after* the
+    # bearer middleware, i.e. as the outermost layer, so a direct request
+    # from an untrusted network gets a 403 before any 401.
+    if hub.settings.require_trusted_proxy or hub.settings.trusted_proxies:
+        app.add_middleware(
+            TrustedProxyMiddleware,
+            hub._trusted_nets,
+            require=hub.settings.require_trusted_proxy,
+            protected_prefix="/mcp",
+            protected_paths=frozenset({"/ready"}),
         )
     return app
 

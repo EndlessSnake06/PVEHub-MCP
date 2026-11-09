@@ -27,7 +27,7 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
 | Python package install | `uv sync --extra dev` |
 | Lint | `uv run ruff check src tests` — clean |
 | Typecheck | `uv run mypy src` — clean |
-| Unit/contract tests | `uv run pytest -o addopts="" -q` — **250 passed, 2 skipped** (integration) |
+| Unit/contract tests | `uv run pytest -o addopts="" -q` | `uv run pytest -o addopts="" -q` — **379 passed, 2 skipped** (integration) |
 | HTTP transport | local uvicorn start, `GET /health` → 200 JSON, `POST /mcp` without token → 401, with token → MCP `initialize` result |
 | stdio transport | real subprocess via MCP client: `tools/list` → 69 tools, `pvehub_health` call |
 | TLS fingerprint pinning | real TLS handshake against `10.0.10.3:8006`; correct SHA-256 accepted, wrong fingerprint rejected |
@@ -39,6 +39,7 @@ live, unauthenticated `apidoc.js` of both servers and the official Proxmox docum
 | Docker image build | Gitea Actions run 2681: four jobs (lint, typecheck, test, docker) succeeded; `docker build --pull -t pvehub-mcp:ci .` completed and exported the image (`sha256:45b13474…`) |
 | CI test gate | Gitea Actions run 2681: `250 passed, 2 skipped` on the runner |
 | Compose runtime smoke | Gitea Actions compose job: `docker compose config`, `docker compose up -d --build`, `/health` 200 inside the container, `docker compose down -v`; policy `readonly.yaml` loaded |
+| Trusted proxy (D024, issue #25) | `tests/test_trusted_proxy.py` — real uvicorn (`proxy_headers=False`) + full MCP session: `X-Forwarded-For` chain behind a trusted `127.0.0.1/32` peer resolves the client IP into the audit (`client_ip`), untrusted peers get 403 before authentication, `/health` stays 200, and the default configuration ignores a forged header (socket peer logged). Full suite **379 passed, 2 skipped**; `ruff` + `mypy` clean |
 
 ## Mocked only
 

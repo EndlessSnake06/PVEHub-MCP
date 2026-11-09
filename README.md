@@ -217,6 +217,12 @@ Notes:
 ## Security (short version)
 
 - Bind the MCP port to LAN/VPN only; put TLS in front of it (reverse proxy).
+- Behind a reverse proxy: set `PVEHUB_TRUSTED_PROXIES` to the proxy's network(s)
+  and `PVEHUB_REQUIRE_TRUSTED_PROXY=true` to reject direct (non-proxy) access with
+  `403` before authentication, and to get the real client IP in the audit log
+  (`client_ip`) — see `docs/DECISIONS.md` D024 (issue #25). Keep the trust set
+  tight; a broad set (e.g. `0.0.0.0/0`) re-opens the `X-Forwarded-For` forgery
+  window.
 - The http transport **refuses to start without `PVEHUB_MCP_AUTH_TOKEN`** (any
   bind address). `PVEHUB_MCP_AUTH_REQUIRED=false` is an explicit, logged
   opt-out for loopback development setups only; a non-loopback bind without a

@@ -159,6 +159,7 @@ class AuditLogger:
         error: dict[str, Any] | None = None,
         result: Any = None,
         client: str | None = None,
+        client_ip: str | None = None,
     ) -> None:
         if not self.enabled or self.path is None:
             return
@@ -167,6 +168,11 @@ class AuditLogger:
             # Present on every entry (D019): "unknown" when no client is
             # known (stdio transport, dev-mode loopback without a token).
             "client": client or "unknown",
+            # Same shape for the address (D024, issue #25): resolved from
+            # the trusted-proxy rules, "unknown" when not resolvable
+            # (stdio, no client in the ASGI scope, untrusted peer without a
+            # usable identity).
+            "client_ip": client_ip or "unknown",
             "tool": tool,
             "category": category,
             "status": status,

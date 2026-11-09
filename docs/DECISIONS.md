@@ -364,3 +364,79 @@ is size-based and local (no external tooling); `keep` bounds total audit storage
 `keep * max_bytes`. The `pvehub_audit_tail` reader (D020) reads the *active* file only;
 archived entries are out of its scope by design (they are for the operator, not the
 control plane).
+
+## D024 — Trusted proxy and client-IP audit attribution (issue #25)
+
+**Context:** The audit log records *who* ran a call (D019's `client`) but not
+*where it came from*. Behind a reverse proxy (Caddy/Traefik/nginx — the normal
+deployment for a server whose token can run `exec_host`) `request.client` is
+the proxy, and `X-Forwarded-For` is the only source of the real client
+address. But that header is untrusted input: a direct client — or any attacker
+who can reach the port — can forge arbitrary entries. Consulting `X-Forwarded-For`
+without a trust model is not attribution, it is a forgery target. Separately,
+a deployment behind a proxy should be able to say "direct access from any
+other network is rejected" — not merely misattribute it.
+
+**Decision:** A new, dependency-free module `pvehub_mcp/proxy.py` (no SDK or
+network imports, unit-testable) implements the trust decision explicitly:
+
+* `trusted_proxies` (`PVEHUB_TRUSTED_PROXIES`, comma-separated CIDRs; a bare
+  IP is a /32 or /128) names the trusted reverse proxies. Malformed entries
+  fail **at startup** (`TrustedProxyError` surfaced through config validation):
+  a misconfigured trust set is a security bug, not a default to fall back on.
+* The direct TCP peer must be inside the set before any forwarded header is
+  consulted. An untrusted peer (or no trust set at all) is attributed to the
+  peer itself — a forged header cannot change that, and the default
+  configuration (empty set) behaves exactly as before: `X-Forwarded-For` is
+  never read.
+* For a trusted peer the chain is read **right to left**: the rightmost entry
+  that is *not* in the trusted set is the client. Rationale: a hop can only
+  append to the *right* of its own position, so the entry a trusted hop saw on
+  the wire (the first untrusted entry from the right) is that hop's real
+  address, not a forged one. If every entry is trusted (an internal client
+  behind an internal proxy), the leftmost entry is the client; malformed
+  entries are dropped (they can be neither a trusted hop nor a client); no
+  usable chain falls back to the peer (e.g. a proxy that strips the header).
+* `require_trusted_proxy` (`PVEHUB_REQUIRE_TRUSTED_PROXY`, default `false`,
+  validated to require a non-empty trust set) adds a 403 gate: a
+  `TrustedProxyMiddleware` is installed as the **outermost** layer — after
+  the bearer middleware, so an untrusted peer gets `403 proxy_required`
+  *before* any `401` — protecting `/mcp` and `/ready`. `GET /health` stays
+  exempt: the container healthcheck probes it from the bridge network and a
+  failed healthcheck is a liveness incident, not a security one (D021). A
+  scope without a socket peer is 403 as well — an unverifiable peer is not
+  passable.
+* `uvicorn` runs with `proxy_headers=False`: forwarded-header handling is
+  explicit in the server (gate + resolver above), not delegated to the
+  framework's proxy-header layer, so the behaviour is testable and documented
+  in one place.
+
+The resolved address is written as `client_ip` into **every** audit entry
+(`audit.py`), including denials and errors: always present, `unknown` when
+unresolvable — the same contract as `client` (D019). The `pvehub_capabilities`
+report and `pvehub_audit_tail` carry the field unchanged by the existing
+redaction (plain addresses are not masked by the redaction rules, which target
+secrets, not locations).
+
+**Verification:** `tests/test_trusted_proxy.py` covers the forgery table
+(10 cases: no trust set, forged chain from an untrusted peer, single- and
+multi-hop chains, all-trusted chain, malformed entries, IPv6, missing peer),
+config validation (malformed entry, `require` without a set, env mapping), the
+403 middleware at ASGI level (untrusted peer, missing peer, `/ready`
+protected, `/health` exempt, no-op default) — and **end to end through a real
+uvicorn server** (`proxy_headers=False`, full MCP session via the streamable
+HTTP client behind a "local reverse proxy", `127.0.0.1/32` trusted): the audit
+entries assert the resolved client address, and a default-configuration run
+asserts that a forged `X-Forwarded-For` is ignored (socket peer logged).
+
+**Consequences:** The audit answers "what, by whom (D019), **from where**" for
+every call, including the ones that were denied — post-incident "which network
+did this come from" is answerable without leaving the log. Forgery resistance
+comes from the trust decision, not from the header: the socket peer is always
+verifiable, the forwarded header only ever is. The trust set is a
+security-critical config: a too-broad set (e.g. `0.0.0.0/0`) re-opens the
+forgery window, which is documented and why strict startup validation exists.
+`require_trusted_proxy` is an operational choice, off by default, so
+proxy-less deployments and every existing configuration are unaffected; a
+403-only deployment behind the homelab proxy sets both variables in one
+`config.yaml` edit.
