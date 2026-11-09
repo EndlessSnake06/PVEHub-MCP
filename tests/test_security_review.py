@@ -249,7 +249,11 @@ class _ResourceRecorder:
 def _resource_hub(policy: Policy) -> tuple[Any, _ResourceRecorder]:
     recorder = _ResourceRecorder()
     hub = SimpleNamespace(
-        mcp=recorder, policy=policy, pve_clients={}, pbs_clients={}
+        mcp=recorder,
+        policy=policy,
+        pve_clients={},
+        pbs_clients={},
+        memory=SimpleNamespace(enabled=True, error=None),
     )
     return hub, recorder
 
@@ -262,6 +266,7 @@ def test_resources_registered_by_default() -> None:
         "proxmox://guests",
         "proxmox://storage",
         "pbs://datastores",
+        "memory://notes",
     }
 
 
@@ -276,7 +281,15 @@ def test_resources_respect_denied_read_category() -> None:
     policy = Policy(file=PolicyFile.model_validate({"categories": {"deny": ["read"]}}))
     hub, recorder = _resource_hub(policy)
     resources.register(hub)
-    assert recorder.uris == []
+    # memory://notes has its own category and stays reachable (#34/D024).
+    assert recorder.uris == ["memory://notes"]
+
+
+def test_resources_respect_denied_memory_category() -> None:
+    policy = Policy(file=PolicyFile.model_validate({"categories": {"deny": ["memory"]}}))
+    hub, recorder = _resource_hub(policy)
+    resources.register(hub)
+    assert "memory://notes" not in recorder.uris
 
 
 # -- transport security ------------------------------------------------------

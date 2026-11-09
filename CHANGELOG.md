@@ -3,9 +3,41 @@
 All notable changes to this project are documented here. Format: Keep a Changelog;
 versioning: Semantic Versioning.
 
-## [Unreleased]
+## [0.1.2] — 2026-11-09
 
 ### Added
+
+- **Memory layer (D025, issues #31-#39).** A SQLite store next to the audit log
+  (`memory_db`, default `<state_dir>/memory.db`, WAL, FTS5 with a `LIKE` fallback)
+  with three tools:
+  - `memory_recall` — full-text search over notes, filters `entity_type`,
+    `entity_key`, `since`, optional last events for the subject;
+  - `memory_remember` — store a note for `guest`, `node`, `datastore`, `cluster`,
+    `convention` or `runbook`, with `title`, `tags`, `expires_in_days`; the body is
+    redacted before it is written, `source` is the client name (D019);
+  - `memory_forget` — tombstone a note, **requires `confirm=true`**.
+  Tool count: 75 -> 78.
+- `_memory` enrichment on successful tool results (issue #35): notes and the last
+  recorded action for the call's subject, marked `trust: "untrusted-data"`, capped by
+  `memory_enrich_max_bytes` and a quarter of `max_output_bytes`, fail-open on any
+  database error.
+- Action history of mutating calls as **metadata events** (issue #33): one row per
+  subject with tool, category, status, instance, client, duration, error code and a
+  static summary. Guest output is never stored; `exec` calls store `command_sha256`
+  plus `command_length` instead of the command, and no `path` subject.
+- TTL, retention and cleanup (issue #36): per-note `expires`, tombstones, global
+  retention in days, event retention, `memory_max_notes`, periodic job
+  (`memory_cleanup_interval_seconds`, `0` disables) and a report per run.
+- MCP resource `memory://notes` and prompt `memory_briefing` (issue #37), both gated by
+  the `memory` category and hidden when the store is disabled.
+- `pvehub_capabilities` reports `memory.{enabled,path,size_bytes,schema_version,fts,enrich,events_dropped,error,last_event_error,cleanup}`.
+- New settings (all optional, defaults shown in `docs/CONFIGURATION.md`):
+  `memory_enabled`, `memory_db`, `memory_enrich`, `memory_enrich_max_bytes`,
+  `memory_enrich_max_notes`, `memory_note_max_bytes`, `memory_retention_days`,
+  `memory_event_retention_days`, `memory_tombstone_days`,
+  `memory_cleanup_interval_seconds`, `memory_max_notes` — YAML keys and
+  `PVEHUB_MEMORY_*` environment variables.
+
 
 - Trusted-proxy support and client-IP audit attribution (D024, issue #25):
   `PVEHUB_TRUSTED_PROXIES` / `trusted_proxies` (comma-separated CIDRs, or bare IPs
@@ -27,12 +59,50 @@ versioning: Semantic Versioning.
   asserting the resolved client IP in the audit log, and a default-configuration run
   asserting that a forged `X-Forwarded-For` is ignored.
 
+### Changed
+
+- Policy categories gained `memory` (recall, resource, prompt) and `memory_write`
+  (remember, forget). They are valid in `categories.deny` and in
+  `safety.require_confirm_for`; `read_only: true` allows `read`, `generic` and
+  `memory`, so recall and enrichment keep working while writes disappear.
+  `config/examples/readonly.yaml` now denies `memory_write` explicitly.
+- Blocked memory tools follow the existing contract: absent from `tools/list`, listed in
+  `pvehub_capabilities` under `tools.blocked` with the reason (`policy: ...` or
+  `memory: ...`).
+
+### Security
+
+- Prompt-injection containment: auto-events contain only metadata (no guest output, no
+  command text, no free-text arguments), and `_memory` is labelled as untrusted data in
+  every response, in the resource payload and in the prompt wording. Notes are never
+  rendered as instructions.
+- The existing audit redaction runs before every memory write and again on every read;
+  secrets in note bodies, tags, titles and argument-derived subjects are not persisted.
+- The store is fail-closed for tools and fail-open for enrichment: an unwritable path
+  disables the memory tools with a reported reason, while a failed enrichment never
+  changes a tool result.
+
 ### Notes
+
 
 - Default configuration is **unchanged**: without `trusted_proxies`, `X-Forwarded-For`
   is never consulted and the socket peer is logged — existing proxy-less and
   proxy-fronted deployments behave exactly as before. The audit schema gains one
   always-present field (`client_ip`); existing consumers are unaffected.
+
+### Upgrade notes
+
+- No action required: every key has a default and the database is created on first
+  start. Existing `policy.yaml` files (including the shipped examples) load unchanged;
+  without the new categories the defaults apply (`memory` and `memory_write` allowed,
+  `read_only` keeps recall only).
+- Back up `/data/memory.db` together with `audit.jsonl`. Copy it with the SQLite backup
+  API (`sqlite3 memory.db ".backup ..."`) — a bare `cp` while WAL is active can miss
+  recent writes.
+- Do not share one `memory.db` between two server processes (stdio + HTTP). Give each
+  transport its own file or volume.
+- The database lives under `/data`; a read-only `/data` disables the memory layer
+  (`memory.enabled=false`, `memory.error`) and the server starts normally.
 
 ## [0.1.1] — 2026-11-08
 

@@ -21,7 +21,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .errors import ConfigError, ConfirmRequired, InvalidArgument, PolicyError
 
-Category = Literal["read", "lifecycle", "write", "destructive", "exec", "generic"]
+Category = Literal[
+    "read",
+    "lifecycle",
+    "write",
+    "destructive",
+    "exec",
+    "generic",
+    "memory",
+    "memory_write",
+]
 CATEGORIES: tuple[Category, ...] = (
     "read",
     "lifecycle",
@@ -29,6 +38,19 @@ CATEGORIES: tuple[Category, ...] = (
     "destructive",
     "exec",
     "generic",
+    # Memory layer, split so a profile can allow recall without allowing
+    # writes (D024): ``memory`` = recall/resource/enrichment, ``memory_write``
+    # = remember/forget.
+    "memory",
+    "memory_write",
+)
+
+#: Categories that are readable in ``read_only`` mode.
+_READ_CATEGORIES: frozenset[Category] = frozenset({"read", "generic", "memory"})
+
+#: Categories that mutate state (vmid allow-list, read_only block).
+_WRITE_CATEGORIES: frozenset[Category] = frozenset(
+    {"lifecycle", "write", "destructive", "exec", "memory_write"}
 )
 
 # Always denied through the generic bridge, regardless of policy. These endpoints hand out
@@ -223,7 +245,7 @@ class Policy:
             return ToolDecision(False, "in tools.deny")
         if category in self.file.categories.deny:
             return ToolDecision(False, f"category {category!r} denied")
-        if self.file.read_only and category not in {"read", "generic"}:
+        if self.file.read_only and category not in _READ_CATEGORIES:
             return ToolDecision(False, "read_only")
         if category == "generic" and self.file.read_only:
             # generic is allowed but restricted to GET at call time
@@ -245,9 +267,9 @@ class Policy:
                 f"tool {name!r} is blocked by policy ({decision.reason})",
                 details={"tool": name, "reason": decision.reason},
             )
-        if self.file.read_only and category in {"lifecycle", "write", "destructive", "exec"}:
+        if self.file.read_only and category in _WRITE_CATEGORIES:
             raise PolicyError(f"read-only mode blocks category {category!r}")
-        if category in {"lifecycle", "write", "destructive", "exec"}:
+        if category in _WRITE_CATEGORIES - {"memory_write"}:
             self._check_vmid_arg(name, args)
         if category in self.file.safety.require_confirm_for:
             dry_run = bool(args.get("dry_run"))

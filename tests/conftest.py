@@ -71,6 +71,8 @@ def _pve_settings(tmp_path: Any) -> Settings:
             "policy_file": str(tmp_path / "policy.yaml"),
             "audit_log": None,
             "state_dir": str(tmp_path),
+            # Explicit path: the test suite must never touch /data (issue #38).
+            "memory_db": str(tmp_path / "memory.db"),
             "capabilities_refresh_seconds": 0,
             "capabilities_fail_open": True,
             "task_timeout_seconds": 5,
@@ -139,9 +141,11 @@ ALL_PRIVILEGES = (
 )
 
 
-def build_hub(*, read_only: bool = False) -> PVEHub:
+def build_hub(tmp_path: Path, *, read_only: bool = False) -> PVEHub:
     settings = Settings(
         transport="stdio",
+        state_dir=str(tmp_path / "state"),
+        memory_db=str(tmp_path / "memory.db"),
         pbs=[
             PBSInstance(
                 name="pbs1",
@@ -173,7 +177,7 @@ def router() -> Any:
 
 
 @pytest.fixture
-async def hub_factory(router: respx.Router) -> Any:
+async def hub_factory(router: respx.Router, tmp_path: Path) -> Any:
     hubs: list[PVEHub] = []
 
     async def factory(
@@ -181,7 +185,7 @@ async def hub_factory(router: respx.Router) -> Any:
         read_only: bool = False,
         privileges: tuple[str, ...] = ALL_PRIVILEGES,
     ) -> PVEHub:
-        hub = build_hub(read_only=read_only)
+        hub = build_hub(tmp_path, read_only=read_only)
         grant_permissions(router, privileges)
         await hub.initialize()
         hubs.append(hub)
@@ -341,6 +345,7 @@ def build_settings(tmp_path: Path, policy_text: str = POLICY) -> Settings:
             "policy_file": str(policy_file),
             "audit_log": str(tmp_path / "audit.jsonl"),
             "state_dir": str(tmp_path / "state"),
+            "memory_db": str(tmp_path / "memory.db"),
         }
     )
 

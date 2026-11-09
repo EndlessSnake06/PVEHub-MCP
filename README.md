@@ -3,7 +3,7 @@
 One MCP server for **Proxmox VE** and **Proxmox Backup Server**, plus shell access to PVE
 hosts, LXC containers, QEMU VMs (guest agent) and the PBS host.
 
-> Status: `0.1.1` — core server, policy engine, curated PVE/PBS/exec tools and packaging are
+> Status: `0.1.2` — core server, policy engine, curated PVE/PBS/exec tools and packaging are
 > implemented. `docs/TOOLS.md` is generated from the code and shows exactly what exists today;
 > `docs/STATUS.md` separates live-verified, mocked and untested behaviour.
 
@@ -18,6 +18,9 @@ hosts, LXC containers, QEMU VMs (guest agent) and the PBS host.
   privilege are not registered, and each call is pre-checked.
 - **Blockable** — every tool and category can be denied via YAML/env policy; denied tools do
   not appear in `tools/list`.
+- **Memory** — `memory_recall` / `memory_remember` / `memory_forget` on a local SQLite
+  file, plus metadata history of mutating calls and a `_memory` context block on tool
+  results (see [Memory layer](docs/CONFIGURATION.md#memory-layer)).
 - **One container, one endpoint** — Streamable HTTP at `/mcp` (bearer), `GET /ready`
   readiness (bearer), unauthenticated `GET /health` liveness, optional stdio.
 
@@ -125,7 +128,7 @@ Claude Desktop launches stdio servers itself. Run the same image with `-i` and n
         "-v", "/Users/you/pvehub/config:/config:ro",
         "-v", "/Users/you/pvehub/ssh:/ssh:ro",
         "-v", "pvehub-data:/data",
-        "pvehub-mcp:0.1.1"
+        "pvehub-mcp:0.1.2"
       ]
     }
   }
@@ -214,6 +217,27 @@ Notes:
 - Revoke by removing the key from `authorized_keys`; the MCP server reconnects with the
   key on the next call.
 
+## Memory (optional, on by default)
+
+The server remembers notes and *what happened to which guest/node/datastore*, without
+becoming a second audit log:
+
+- `memory_remember` stores a note for `guest`, `node`, `datastore`, `cluster`,
+  `convention` or `runbook` (`title`, `tags`, optional `expires_in_days`).
+  `memory_forget` tombstones it and requires `confirm=true`.
+- `memory_recall` searches the notes (FTS5, `LIKE` fallback) and returns the last
+  recorded actions for a subject.
+- Mutating calls are recorded as **metadata only** — no guest output, and for `exec`
+  only `command_sha256` and the command length, never the command itself.
+- Successful tool results get a `_memory` block labelled `trust: "untrusted-data"`;
+  errors and memory tools never do, and a failed enrichment never changes a result.
+- Read-only profiles keep recall and enrichment; `categories.deny: [memory]` removes the
+  feature entirely. Notes and the action history live in `/data/memory.db` (SQLite,
+  `0600`, no extra service) and are cleaned up by TTL, retention and a note cap.
+
+Everything is configurable (`PVEHUB_MEMORY_*`, see `docs/CONFIGURATION.md`), and a
+read-only `/data` disables the layer with a reported reason instead of failing the start.
+
 ## Security (short version)
 
 - Bind the MCP port to LAN/VPN only; put TLS in front of it (reverse proxy).
@@ -283,7 +307,7 @@ Notes:
 make install        # uv sync --extra dev
 make check          # ruff + mypy + pytest
 make docs-tools     # regenerate docs/TOOLS.md from @hub.tool declarations
-make docker-build   # docker build -t pvehub-mcp:0.1.1 .
+make docker-build   # docker build -t pvehub-mcp:0.1.2 .
 ```
 
 The Docker image is built by CI (`.gitea/workflows/ci.yml`); the development sandbox has

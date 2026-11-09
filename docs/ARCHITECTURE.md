@@ -13,6 +13,7 @@ MCP client (Claude, Hermes, Open WebUI, ...)
 │  policy.py       categories, allow/deny, generic API rules   │
 │  capabilities.py token permissions → tool availability       │
 │  audit.py        JSONL audit trail + redaction               │
+│  memory.py       SQLite notes + call-metadata events         │
 │                                                              │
 │  tools/          curated tools + generic API bridges          │
 │                                                              │
@@ -125,6 +126,7 @@ src/pvehub_mcp/
   policy.py          allow/deny, categories, path rules, exec gates
   capabilities.py    permission discovery and privilege mapping
   audit.py           JSONL audit log, redaction, truncation
+  memory.py          SQLite memory store (notes, events, retention, _memory)
   errors.py          typed errors and JSON error envelopes
   clients/
     base.py          shared httpx client, retries, TLS, form encoding
@@ -134,6 +136,7 @@ src/pvehub_mcp/
   tools/
     registry.py      registration + guard wrapper
     meta.py          pvehub_capabilities
+    memory.py        memory_recall / memory_remember / memory_forget
     pve_generic.py   pve_api_schema, pve_api_call
     pve_cluster.py   cluster/nodes/HA
     pve_guests.py    list/status/config/power/snapshot/clone/migrate/create/delete/resize

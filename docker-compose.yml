@@ -13,7 +13,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: pvehub-mcp:0.1.1
+    image: pvehub-mcp:0.1.2
     env_file:
       - .env
     ports:
@@ -22,7 +22,7 @@ services:
       # Configuration and policy are read-only; SSH material is read-only too.
       - ./config:/config:ro
       - ./ssh:/ssh:ro
-      # Audit log, UPID/schema caches, capability state.
+      # Audit log, memory.db (SQLite, D025), UPID/schema caches, capability state.
       - pvehub-data:/data
     read_only: true
     tmpfs:

@@ -28,6 +28,12 @@ from .clients.pve import PVEClient
 from .clients.ssh import SSHClientPool
 from .config import Settings
 from .errors import InvalidArgument, NotFound, PolicyError, PVEHubError
+from .memory import (
+    MemoryStore,
+    derive_subjects,
+    event_summary,
+    should_record_event,
+)
 from .policy import Category, Policy
 from .proxy import is_trusted, parse_trusted_proxies, resolve_client_ip
 from .toolnaming import derive_title
@@ -78,6 +84,22 @@ class PVEHub:
             max_string=max(2048, settings.max_output_bytes // 8),
             max_bytes=settings.audit_max_bytes,
             keep=settings.audit_keep,
+        )
+        # Memory layer (epic #31). The store opens its SQLite file here; an
+        # unwritable path disables the feature without stopping the server.
+        self.memory = MemoryStore(
+            settings.memory_db_path,
+            enabled=settings.memory_enabled,
+            note_max_bytes=settings.memory_note_max_bytes,
+            enrich_enabled=settings.memory_enrich,
+            enrich_max_bytes=settings.memory_enrich_max_bytes,
+            enrich_max_notes=settings.memory_enrich_max_notes,
+            max_output_bytes=settings.max_output_bytes,
+            retention_days=settings.memory_retention_days,
+            event_retention_days=settings.memory_event_retention_days,
+            tombstone_days=settings.memory_tombstone_days,
+            cleanup_interval_seconds=settings.memory_cleanup_interval_seconds,
+            max_notes=settings.memory_max_notes,
         )
         self.ssh = SSHClientPool(settings.ssh)
         self.pve_clients: dict[str, PVEClient] = {}
@@ -133,6 +155,14 @@ class PVEHub:
         await self.capabilities.refresh()
         self._register_all()
         await self.capabilities.start_periodic_refresh()
+        # Cleanup once at startup (expired notes, retention, tombstones) and
+        # then periodically; both are best-effort and never block startup.
+        if self.memory.enabled:
+            try:
+                await self.memory.cleanup()
+            except Exception:
+                logger.exception("memory cleanup at startup failed")
+            await self.memory.start_cleanup_task()
         self._initialized = True
 
     async def close(self) -> None:
@@ -141,6 +171,7 @@ class PVEHub:
         for client in [*self.pve_clients.values(), *self.pbs_clients.values()]:
             await client.aclose()
         await self.ssh.close()
+        await self.memory.close()
 
     @property
     def mcp(self) -> MCPServer:
@@ -251,6 +282,12 @@ class PVEHub:
 
         return decorator
 
+    def block_tool(self, name: str, category: Category, reason: str) -> None:
+        """Report a tool that is not exposed, with the reason (#34)."""
+
+        self.blocked.append(BlockedTool(name, category, reason))
+        logger.info("tool %s blocked: %s", name, reason)
+
     def _register(
         self,
         fn: Callable[..., Awaitable[Any]],
@@ -306,9 +343,9 @@ class PVEHub:
             description = f"{description}\n\n{note}"
         annotations = ToolAnnotations(
             title=title_text,
-            readOnlyHint=category == "read",
+            readOnlyHint=category in {"read", "memory"},
             destructiveHint=category == "destructive",
-            idempotentHint=category in {"read", "generic"},
+            idempotentHint=category in {"read", "generic", "memory"},
             openWorldHint=False,
         )
         self.mcp.add_tool(
@@ -414,6 +451,9 @@ class PVEHub:
                 text = result if isinstance(result, str) else dumps(result)
                 if len(text.encode("utf-8")) > self.settings.max_output_bytes:
                     text = _shrink(text, self.settings.max_output_bytes)
+                # Enrichment runs after the size cap and is strictly fail-open:
+                # a broken memory path returns the original text unchanged.
+                text = await self.memory.enrich(name, kwargs, text)
                 response = text
                 return text
             except PolicyError as exc:
@@ -452,6 +492,21 @@ class PVEHub:
                     client=client,
                     client_ip=client_ip,
                 )
+                # Issue #33: metadata only, never command text or guest output.
+                if should_record_event(category, kwargs):
+                    await self.memory.record_event(
+                        tool=name,
+                        category=category,
+                        status=status,
+                        client=client,
+                        subjects=derive_subjects(
+                            kwargs, include_path=category != "exec"
+                        ),
+                        summary=event_summary(name, category, status, kwargs),
+                        instance=instance if isinstance(instance, str) else None,
+                        duration_ms=duration,
+                        error_code=str(error["code"]) if error else None,
+                    )
 
         # The SDK locates the injectable parameter via
         # typing.get_type_hints(), which for string annotations follows
@@ -485,6 +540,7 @@ class PVEHub:
             exec_pbs,
             exec_vm,
             files,
+            memory,
             meta,
             pbs_datastore,
             pbs_generic,
@@ -520,6 +576,7 @@ class PVEHub:
         exec_host.register(self)
         exec_pbs.register(self)
         files.register(self)
+        memory.register(self)
         resources.register(self)
         prompts.register(self)
 
@@ -560,6 +617,9 @@ class PVEHub:
             },
             "capabilities": self.capabilities.report() if self.capabilities else None,
             "shell": shell,
+            # Issue #32: state of the memory layer, including the reason when
+            # it is disabled (read-only FS, missing permissions, wrong path).
+            "memory": self.memory.report(),
             # D023 (issue #19): rotation settings and the last write error so
             # a silently stopped audit is visible, not only in the container log.
             "audit": {
