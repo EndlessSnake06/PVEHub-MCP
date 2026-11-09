@@ -71,6 +71,12 @@ class InvalidArgument(PVEHubError):
     code = "invalid_argument"
 
 
+class MemoryUnavailable(PVEHubError):
+    """The memory store is disabled or its database is unavailable (#32)."""
+
+    code = "memory_disabled"
+
+
 class AuditError(PVEHubError):
     code = "audit_error"
 

@@ -252,6 +252,25 @@ class Settings(BaseModel):
     capabilities_fail_open: bool = True
     wait_default: bool = True
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+
+    # -- memory layer (epic #31, D024) -----------------------------------
+    #: SQLite memory store; ``memory_db`` defaults to ``<state_dir>/memory.db``
+    #: so that ``PVEHUB_STATE_DIR`` moves the database with the audit log.
+    memory_enabled: bool = True
+    memory_db: str | None = None
+    #: Attach a ``_memory`` block to successful tool results (#35).
+    memory_enrich: bool = True
+    memory_enrich_max_bytes: int = 2048
+    memory_enrich_max_notes: int = 5
+    #: Hard cap for one note body in bytes (#34).
+    memory_note_max_bytes: int = 8192
+    #: Retention windows in days; 0 disables the respective rule.
+    memory_retention_days: int = 180
+    memory_event_retention_days: int = 90
+    memory_tombstone_days: int = 30
+    #: Seconds between cleanup runs; 0 disables the background job (#36).
+    memory_cleanup_interval_seconds: int = 3600
+    memory_max_notes: int = 2000
     allow_insecure_http: bool = False
 
     @field_validator("mcp_auth_token")
@@ -348,7 +367,30 @@ class Settings(BaseModel):
                 parse_trusted_proxies(",".join(self.trusted_proxies))
             except TrustedProxyError as exc:
                 raise ValueError(f"invalid trusted_proxies: {exc}") from exc
+        if self.memory_note_max_bytes < 256:
+            raise ValueError("memory_note_max_bytes must be at least 256")
+        if self.memory_enrich_max_bytes < 256:
+            raise ValueError("memory_enrich_max_bytes must be at least 256")
+        if self.memory_enrich_max_notes < 0:
+            raise ValueError("memory_enrich_max_notes must not be negative")
+        for field_name in (
+            "memory_retention_days",
+            "memory_event_retention_days",
+            "memory_tombstone_days",
+            "memory_cleanup_interval_seconds",
+            "memory_max_notes",
+        ):
+            if getattr(self, field_name) < 0:
+                raise ValueError(f"{field_name} must not be negative")
         return self
+
+    @property
+    def memory_db_path(self) -> str:
+        """Absolute path of the memory database (``/data/memory.db`` default)."""
+
+        if self.memory_db:
+            return self.memory_db
+        return str(Path(self.state_dir) / "memory.db")
 
     def pve_instance(self, name: str | None) -> PVEInstance:
         return _pick(self.pve, name, "PVE")
@@ -426,6 +468,20 @@ def _apply_env(data: dict[str, Any]) -> dict[str, Any]:
         "PVEHUB_WAIT_DEFAULT": ("wait_default", _as_bool),
         "PVEHUB_LOG_LEVEL": ("log_level", str),
         "PVEHUB_ALLOW_INSECURE_HTTP": ("allow_insecure_http", _as_bool),
+        "PVEHUB_MEMORY_ENABLED": ("memory_enabled", _as_bool),
+        "PVEHUB_MEMORY_DB": ("memory_db", str),
+        "PVEHUB_MEMORY_ENRICH": ("memory_enrich", _as_bool),
+        "PVEHUB_MEMORY_ENRICH_MAX_BYTES": ("memory_enrich_max_bytes", int),
+        "PVEHUB_MEMORY_ENRICH_MAX_NOTES": ("memory_enrich_max_notes", int),
+        "PVEHUB_MEMORY_NOTE_MAX_BYTES": ("memory_note_max_bytes", int),
+        "PVEHUB_MEMORY_RETENTION_DAYS": ("memory_retention_days", int),
+        "PVEHUB_MEMORY_EVENT_RETENTION_DAYS": ("memory_event_retention_days", int),
+        "PVEHUB_MEMORY_TOMBSTONE_DAYS": ("memory_tombstone_days", int),
+        "PVEHUB_MEMORY_CLEANUP_INTERVAL_SECONDS": (
+            "memory_cleanup_interval_seconds",
+            int,
+        ),
+        "PVEHUB_MEMORY_MAX_NOTES": ("memory_max_notes", int),
     }
     for env_name, (key, caster) in mapping.items():
         raw = _env(env_name)
