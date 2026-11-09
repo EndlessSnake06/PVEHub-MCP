@@ -64,9 +64,7 @@ def redact_value(value: Any, *, max_string: int = 2048, _depth: int = 0) -> Any:
                     "preview": redacted_preview,
                 }
             else:
-                result[key_text] = redact_value(
-                    item, max_string=max_string, _depth=_depth + 1
-                )
+                result[key_text] = redact_value(item, max_string=max_string, _depth=_depth + 1)
         return result
     if isinstance(value, (list, tuple, set)):
         return [redact_value(item, max_string=max_string, _depth=_depth + 1) for item in value]
@@ -74,11 +72,7 @@ def redact_value(value: Any, *, max_string: int = 2048, _depth: int = 0) -> Any:
     if isinstance(value, str):
         text = value
         for pattern in _SECRET_VALUE_PATTERNS:
-            text = (
-                pattern.sub(r"\1***", text)
-                if pattern.groups
-                else pattern.sub("***", text)
-            )
+            text = pattern.sub(r"\1***", text) if pattern.groups else pattern.sub("***", text)
         if len(text) > max_string:
             text = text[:max_string] + f"...[truncated {len(text) - max_string} chars]"
         return text
@@ -160,6 +154,7 @@ class AuditLogger:
         result: Any = None,
         client: str | None = None,
         client_ip: str | None = None,
+        pve_token: str | None = None,
     ) -> None:
         if not self.enabled or self.path is None:
             return
@@ -167,6 +162,10 @@ class AuditLogger:
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             # Present on every entry (D019): "unknown" when no client is
             # known (stdio transport, dev-mode loopback without a token).
+            # Passthrough mode (D026, issue #30) has no named MCP client —
+            # the PVE API token is the credential — so this stays "unknown"
+            # there and the PVE token *identity* is carried separately in
+            # the ``pve_token`` field (an ID, never the secret).
             "client": client or "unknown",
             # Same shape for the address (D024, issue #25): resolved from
             # the trusted-proxy rules, "unknown" when not resolvable
@@ -179,6 +178,13 @@ class AuditLogger:
         }
         if instance:
             entry["instance"] = instance
+        if pve_token:
+            # D026 (issue #30): the *identity* of the PVE API token used for
+            # the PVE call (user@realm!tokenid), redacted like everything
+            # else. Never the secret — the secret only ever exists in the
+            # client's Authorization header and in the client object's own
+            # header (both memory-only, never serialized here).
+            entry["pve_token"] = _safe_redact(pve_token, max_string=self.max_string)
         if target:
             entry["target"] = _safe_redact(target, max_string=self.max_string)
         if params:

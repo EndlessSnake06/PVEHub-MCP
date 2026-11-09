@@ -142,9 +142,7 @@ class CapabilityManager:
         )
         self.last_refresh = time.time()
 
-    async def _refresh_one(
-        self, kind: str, name: str, client: PVEClient | PBSClient
-    ) -> None:
+    async def _refresh_one(self, kind: str, name: str, client: PVEClient | PBSClient) -> None:
         try:
             permissions = await client.permissions()
             snapshot = CapabilitySnapshot(
@@ -238,6 +236,26 @@ class CapabilityManager:
     ) -> None:
         self._check("pbs", self.pbs, instance, requirements, values)
 
+    def check_pve_token_snapshot(
+        self,
+        instance: str,
+        snapshot: CapabilitySnapshot,
+        requirements: Sequence[Privilege],
+        values: dict[str, Any],
+    ) -> None:
+        """Per-token capability gate for passthrough mode (D026, issue #30).
+
+        Checks against a snapshot that was fetched **for this exact token**
+        (see :class:`pvehub_mcp.passthrough.TokenValidationCache`): the
+        cache key includes the full token identity, so nothing is shared
+        between clients. The fail_open/fail_closed semantics are identical
+        to :meth:`check_pve` — including the "discovery failed (HTTP 403,
+        no Sys.Audit)" case, where PVE keeps enforcing per call.
+        """
+        if not requirements:
+            return
+        self._check_against("pve", snapshot, instance, requirements, values)
+
     def _check(
         self,
         kind: str,
@@ -254,6 +272,18 @@ class CapabilityManager:
                 logger.warning("%s %s: no capability snapshot; allowing call (fail_open)", kind, instance)
                 return
             raise PermissionDenied(f"{kind} {instance}: permissions not discovered")
+        self._check_against(kind, snapshot, instance, requirements, values)
+
+    def _check_against(
+        self,
+        kind: str,
+        snapshot: CapabilitySnapshot,
+        instance: str,
+        requirements: Sequence[Privilege],
+        values: dict[str, Any],
+    ) -> None:
+        if not requirements:
+            return
         if snapshot.error:
             if self.fail_open:
                 logger.warning(
@@ -263,9 +293,7 @@ class CapabilityManager:
                     snapshot.error,
                 )
                 return
-            raise PermissionDenied(
-                f"{kind} {instance}: permission discovery failed: {snapshot.error}"
-            )
+            raise PermissionDenied(f"{kind} {instance}: permission discovery failed: {snapshot.error}")
         missing: list[str] = []
         for requirement in requirements:
             path = requirement.resolve(values)
@@ -293,9 +321,7 @@ class CapabilityManager:
                 raise InvalidArgument(f"no {kind.upper()} instance configured")
             return next(iter(clients))
         if name not in clients:
-            raise InvalidArgument(
-                f"unknown {kind.upper()} instance {name!r}; configured: {', '.join(clients)}"
-            )
+            raise InvalidArgument(f"unknown {kind.upper()} instance {name!r}; configured: {', '.join(clients)}")
         return name
 
 

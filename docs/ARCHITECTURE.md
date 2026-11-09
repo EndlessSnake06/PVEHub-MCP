@@ -94,6 +94,49 @@ and a clear `permission_denied` error is returned instead of a raw HTTP 403. Dis
 repeated every `PVEHUB_CAPABILITIES_REFRESH_SECONDS`; availability metadata is updated, but
 the registered tool set is fixed for the process lifetime (restart to re-evaluate).
 
+## Bearer pass-through (D026, issue #30)
+
+The **default** mode (`mcp_auth_mode: "static"`) authenticates MCP clients with named
+tokens (D019) and calls PVE with one configured service token. **Passthrough**
+(`mcp_auth_mode: "passthrough"`, opt-in) changes the credential model: the
+`Authorization: Bearer` value **is** the requesting client's own PVE API token, and it is
+used as the credential for every PVE call of that request. The configured service token is
+never used in this mode (fail-closed).
+
+* **Edge.** `PassthroughBearerMiddleware` replaces the named-token
+  `BearerAuthMiddleware` for `/mcp` and `/ready`. It performs *structural* validation only
+  (`parse_pve_bearer`: `user@realm!tokenid=<secret>`, secret ≥ 16 chars, no whitespace)
+  and returns `401` for anything else. It does **not** call PVE.
+* **Validation (deferred, per request + per instance).** The tool wrapper resolves the
+  bearer (from the request context, or by re-parsing the raw `Authorization` header when
+  the SDK runs the call in a different task), then calls `GET /access/permissions` *with
+  that token*. A `401` is a hard `AuthenticationError` (no fallback). A `403` (PVE
+  authenticates before it ACLs, so the token is real but lacks `Sys.Audit`) is trusted and
+  recorded as a discovery failure. A `200` yields the per-token permission snapshot.
+* **Cache.** `TokenValidationCache` is a bounded, TTL cache keyed by the **full** token
+  identity (user, realm, token-id **and** secret) per PVE instance, so a rotated secret is
+  a new key (re-validated immediately) and two clients with different tokens never share a
+  validated state or a permission snapshot. Evicted entries return their clients so they
+  are closed.
+* **Scoped client.** The validated `TokenState` is stored in a request-local context
+  (`pve_scoped_context`). `PVEHub.pve()` returns the per-request client — whose
+  `Authorization` header carries the request's token — and is fail-closed (raises
+  `AuthenticationError` with no validated token instead of falling back to the configured
+  service token). `PVEHub.pbs()` raises `AuthenticationError` in passthrough mode.
+* **Call-time gate is the boundary.** The request's token is unknown at registration, so
+  PVE tool visibility is **not** permission-filtered in this mode; the per-call
+  `check_pve_token_snapshot` gate runs against the token's own snapshot (fail-open /
+  fail-closed per `capabilities_fail_open`), and PVE enforces the caller's ACL on every
+  call regardless.
+* **PBS is out of scope (closes issue #7).** A PVE API token is not a PBS credential, and
+  the only credential a passthrough request carries is a PVE token, so no PBS tool is
+  registered in this mode (blocked at registration, reported under `tools.blocked`).
+  Static mode remains the only way to reach PBS.
+* **Audit & visibility.** The audit log writes the token **identity** (`user@realm!tokenid`,
+  never the secret) into a `pve_token` field; `client` stays `unknown` (there is no named
+  MCP token). `pvehub_capabilities` reports an `auth` block (`mode`, `required`,
+  `token_validation_ttl` in passthrough). Static mode is byte-for-byte unchanged.
+
 ## Configuration and policy precedence
 
 ```
@@ -166,6 +209,8 @@ src/pvehub_mcp/
 | PVE/PBS unreachable at startup | server starts; capabilities marked `unknown`; tools registered if `capabilities.fail_open`; `GET /ready` reports `degraded` with HTTP `503` (liveness `/health` stays `200`) |
 | Permission discovery 401/403 | treated as "no permissions"; no privileged tools registered |
 | API 403 at call time | `permission_denied` with required privilege and path |
+| Passthrough token rejected by PVE (401) | the call fails with `AuthenticationError`; **no** fallback to the configured service token; the identity is not cached as valid (revalidated next use) |
+| Passthrough token valid but lacks `Sys.Audit` (403) | identity trusted; per-token snapshot records a discovery failure; PVE keeps enforcing the caller's ACL per call |
 | Task timeout (`wait=true`) | returns UPID + `timed_out: true`; caller can poll `*_task_status` |
 | SSH unavailable | shell tools hidden unless SSH config is complete; runtime errors include the missing prerequisite |
 | Audit file not writable | warning, server continues, audit disabled (reported in `pvehub_capabilities`) |

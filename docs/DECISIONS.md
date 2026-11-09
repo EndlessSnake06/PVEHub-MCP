@@ -497,3 +497,84 @@ SQLite backup API, not a bare `cp` while WAL is active). Free-text notes remain 
 place where untrusted input is stored; every consumer is told, in-band, that `_memory`
 is data. Migrations are additive (`user_version`), so an upgrade keeps existing notes
 and an old `policy.yaml` without the new categories keeps loading unchanged.
+
+## D026 — Bearer pass-through: the MCP bearer *is* the PVE API token (issue #30)
+
+**Context:** In the default ("static") mode the server authenticates MCP clients with
+named tokens (D019) and then calls PVE with a single *configured* service token. Three
+problems follow: (1) every action in PVE and in the audit is attributed to the service
+account, not to the human who issued the request, so the per-client audit attribution of
+D019 stops at the MCP boundary; (2) the operator must provision a powerful service
+token for the server to do anything, which is exactly the standing privilege a
+compromised server would inherit; (3) issue #7 left PBS in passthrough undecidable,
+because a PVE API token and a PBS credential are different things and the single
+configured token conflated them.
+
+**Decision:** Add an opt-in `mcp_auth_mode: "passthrough"`. In this mode the MCP bearer
+is not a server token at all — it is the *requesting client's own PVE API token*, and
+the server uses it as the credential for every PVE call of that request.
+
+* **The bearer is a PVE API token, structurally.** `parse_pve_bearer` accepts only
+  `Bearer <user@realm!tokenid>=<secret>` (a realm `@`, the PVE token separator `!`, no
+  whitespace, a secret of at least 16 characters). Anything else — a missing header, a
+  plain MCP service token, a typo — is rejected **at the edge** with a `401` by the
+  `PassthroughBearerMiddleware`, which *replaces* the named-token `BearerAuthMiddleware`
+  for `/mcp` and `/ready`. There is no named client to resolve, so the audit's
+  `client` stays `"unknown"`; the request's identity is carried in a new `pve_token`
+  audit field that records the token *identity only* (`user@realm!tokenid`), never the
+  secret.
+* **Config is fail-loud.** `mcp_auth_mode="passthrough"` requires at least one PVE
+  instance (there is nothing to validate the token against otherwise), the `http`
+  transport (the token rides an HTTP header that does not exist on stdio),
+  `mcp_auth_required=true` (the token is the credential, so an unauthenticated `/mcp`
+  would defeat the contract), and `mcp_token_validation_ttl >= 1`. It *exempts* the
+  "an MCP bearer is required for http" rule, because the PVE token is that credential.
+* **Validation is one round-trip, cached per (instance, full token identity).** On the
+  first use of a token the server calls `GET /access/permissions` *with that token*. A
+  `401` means PVE rejected it: the call fails with a clear `AuthenticationError` and
+  **no** fallback to the configured token. A `403` means the token authenticated (PVE
+  authenticates before it ACLs) but lacks `Sys.Audit`: the identity is trusted, the
+  per-token snapshot records the discovery failure, and PVE keeps enforcing every call
+  per call. A `200` yields the per-token permission snapshot. Results are cached in a
+  bounded, TTL-based `TokenValidationCache` keyed by the *full* token identity
+  (user, realm, token-id, **and** secret), so a rotated secret is a new key
+  (re-validated immediately) and two clients with different tokens never share a
+  validated state or a permission snapshot. The cache owns the clock and the eviction
+  returns evicted entries so their HTTP clients are closed.
+* **The per-request client is scoped, never the configured one.** The wrapper
+  resolves the bearer (from the request context when the SDK runs the call in the
+  middleware's task, otherwise by re-parsing the raw `Authorization` header — the only
+  channel that always reaches the tool), validates it, and stores the resulting
+  `TokenState` in a request-local `pve_scoped_context`. `PVEHub.pve()` hands out
+  *that* client, whose `Authorization` header carries the request's token, and is
+  **fail-closed**: with no validated token for the requested instance it raises
+  `AuthenticationError` rather than falling back to the configured service token.
+  `PVEHub.pbs()` raises `AuthenticationError` in passthrough mode, because a PVE API
+  token is not a PBS credential.
+* **PBS is out of scope for passthrough (closes issue #7).** A PVE API token is not
+  valid on the PBS API, and the only credential a passthrough request carries is a PVE
+  token. So *no* PBS tool is registered in passthrough mode: each is blocked at
+  registration with the reason `passthrough: PVE API tokens are not valid on the PBS
+  API (run in static mode for PBS access)`, reported like any other block under
+  `tools.blocked`. Static mode is unchanged and remains the only way to reach PBS.
+* **The call-time per-token gate is the security boundary.** In passthrough mode the
+  request's token is unknown at registration time, so tool *visibility* is no longer
+  permission-filtered (it cannot be, against a credential that is not the configured
+  one). Visibility is therefore not gated at registration; the per-call
+  `check_pve_token_snapshot` gate runs against the token's own snapshot (fail-open /
+  fail-closed per the `capabilities_fail_open` policy), and PVE enforces every call
+  with the request's own ACL regardless.
+* **The mode is visible.** `pvehub_capabilities` reports an `auth` block
+  (`mode`, `required`, and `token_validation_ttl` in passthrough) so an operator can
+  see how the endpoint authenticates.
+
+**Consequences:** PVE- and audit-side attribution now reach the requesting client's own
+identity end to end; the server holds no standing PVE privilege of its own in
+passthrough mode — a compromised server can do exactly what the *current request's*
+token allows, and nothing more. The cost is that every distinct PVE token is validated
+once (cached, bounded, TTL) and that PBS is unavailable in this mode (a deliberate
+trade, documented here as the resolution of issue #7). Static mode is byte-for-byte
+unchanged and remains the default; passthrough is strictly opt-in and config-validated,
+so an existing deployment is unaffected by upgrading. The `pve_token` audit field adds
+one more identity to the redacted entry; the secret is never written, and the existing
+`pvehub_audit_tail` redaction applies to it.

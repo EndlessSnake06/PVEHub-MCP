@@ -27,12 +27,28 @@ from .clients.pbs import PBSClient
 from .clients.pve import PVEClient
 from .clients.ssh import SSHClientPool
 from .config import Settings
-from .errors import InvalidArgument, NotFound, PolicyError, PVEHubError
+from .errors import (
+    AuthenticationError,
+    InvalidArgument,
+    NotFound,
+    PermissionDenied,
+    PolicyError,
+    PVEHubError,
+)
 from .memory import (
     MemoryStore,
     derive_subjects,
     event_summary,
     should_record_event,
+)
+from .passthrough import (
+    PVEToken,
+    TokenState,
+    TokenValidationCache,
+    make_snapshot,
+    parse_pve_bearer,
+    pve_bearer_context,
+    pve_scoped_context,
 )
 from .policy import Category, Policy
 from .proxy import is_trusted, parse_trusted_proxies, resolve_client_ip
@@ -109,6 +125,12 @@ class PVEHub:
         self.blocked: list[BlockedTool] = []
         self._initialized = False
         self._mcp: MCPServer | None = None
+        # D026 (issue #30): token pass-through. The flag is fixed at
+        # construction (config-validated); the per-(instance, token)
+        # validation cache is created in initialize() once the PVE
+        # instances exist.
+        self._passthrough = settings.mcp_auth_mode == "passthrough"
+        self._token_cache: TokenValidationCache | None = None
 
     # -- client factories --------------------------------------------------
     async def initialize(self) -> None:
@@ -153,6 +175,14 @@ class PVEHub:
             refresh_seconds=self.settings.capabilities_refresh_seconds,
         )
         await self.capabilities.refresh()
+        # D026 (issue #30): the per-(instance, token) validation cache. It is
+        # only created in passthrough mode — in static mode the configured
+        # service token is the (single) credential and nothing is validated
+        # per request.
+        if self._passthrough:
+            self._token_cache = TokenValidationCache(
+                ttl_seconds=float(self.settings.mcp_token_validation_ttl),
+            )
         self._register_all()
         await self.capabilities.start_periodic_refresh()
         # Cleanup once at startup (expired notes, retention, tombstones) and
@@ -170,6 +200,14 @@ class PVEHub:
             await self.capabilities.stop()
         for client in [*self.pve_clients.values(), *self.pbs_clients.values()]:
             await client.aclose()
+        # D026 (issue #30): per-request PVE clients are one-per
+        # (instance, token); they close with the validation cache.
+        if self._token_cache is not None:
+            for state in await self._token_cache.clear():
+                try:
+                    await state.client.aclose()
+                except Exception:
+                    logger.debug("closing per-request PVE client failed", exc_info=True)
         await self.ssh.close()
         await self.memory.close()
 
@@ -208,15 +246,40 @@ class PVEHub:
     # -- client accessors --------------------------------------------------
     def pve(self, instance: str | None = None) -> PVEClient:
         name = self._instance_name("pve", instance, self.pve_clients)
+        # D026 (issue #30): in passthrough mode the (unchanged) tool code
+        # must call PVE with the *requesting client's own* API token, not
+        # the configured service token. The wrapper validated the bearer and
+        # stored the resulting TokenState in pve_scoped_context before the
+        # tool ran; hand that per-request client out.
+        #
+        # Fail-closed: with no validated per-request token for this
+        # instance there is no legal PVE call — the configured service token
+        # is never used as a fallback.
+        if self._passthrough:
+            state = pve_scoped_context.get()
+            if state is not None and state.instance == name:
+                return state.client
+            raise AuthenticationError(
+                f"pve {name}: no validated PVE API token in the current request "
+                "context; passthrough mode does not fall back to the configured "
+                "service token"
+            )
         return self.pve_clients[name]
 
     def pbs(self, instance: str | None = None) -> PBSClient:
+        # D026 (issue #30): a PVE API token is not valid on the PBS API. In
+        # passthrough mode the only credential in a request is a PVE token,
+        # so there is no legal PBS call — fail-closed (PBS tools are also
+        # blocked at registration, so this is defense in depth).
+        if self._passthrough:
+            raise AuthenticationError(
+                "pbs: PVE API tokens are not valid on the PBS API; passthrough "
+                "mode does not use the configured PBS service token"
+            )
         name = self._instance_name("pbs", instance, self.pbs_clients)
         return self.pbs_clients[name]
 
-    def _instance_name(
-        self, kind: str, instance: str | None, clients: dict[str, Any]
-    ) -> str:
+    def _instance_name(self, kind: str, instance: str | None, clients: dict[str, Any]) -> str:
         if not clients:
             raise InvalidArgument(f"no {kind.upper()} instance configured")
         if instance is None:
@@ -226,6 +289,130 @@ class PVEHub:
                 f"unknown {kind.upper()} instance {instance!r}; configured: {', '.join(clients)}"
             )
         return instance
+
+    # -- token pass-through (D026, issue #30) ------------------------------
+    def _request_pve_token(self, ctx: Context | None) -> PVEToken | None:
+        """The per-request PVE API token (D026, issue #30), or ``None``.
+
+        The bearer is read from the raw HTTP request — the only channel that
+        reaches the tool even when the SDK runs the call in a task other than
+        the middleware's (see :func:`_raw_request`). If the middleware's
+        parsed token is already in the current context (same task), it is
+        preferred; otherwise the raw header is re-parsed.
+
+        Fail-closed: a malformed bearer raises
+        :class:`~pvehub_mcp.errors.AuthenticationError`. The middleware has
+        already answered the structural case with a 401 at the edge; this is
+        defense in depth. Returns ``None`` only when there is no HTTP request
+        at all (stdio) — config validation forbids passthrough on stdio, so
+        this path is unreachable in a valid passthrough deployment.
+        """
+        token = pve_bearer_context.get()
+        if token is not None:
+            return token
+        request = _raw_request(ctx)
+        if request is None:
+            return None
+        raw = request.headers.get("authorization", "")
+        token = parse_pve_bearer(raw)
+        if token is None:
+            raise AuthenticationError(
+                "invalid PVE API token in the Authorization header (expected: "
+                "Bearer <token-id>=<token-secret>); passthrough mode is fail-closed "
+                "and does not fall back to the configured service token"
+            )
+        return token
+
+    def _scoped_pve(self, instance: str, token: PVEToken) -> PVEClient:
+        """A :class:`PVEClient` bound to ``token`` for ``instance`` (D026).
+
+        The instance's network configuration (URL, TLS, timeout, retries) is
+        reused from the configured instance; only the credentials become the
+        request's token. This is the client the (unchanged) tool code calls:
+        its ``Authorization`` header carries the request's token, so PVE
+        authorizes every call against the requesting client's own ACL.
+        """
+        cfg = self.settings.pve_instance(instance)
+        return PVEClient(
+            name=cfg.name,
+            url=cfg.url,
+            api_path=cfg.api_path,
+            token_id=token.token_id,
+            token_secret=token.token_secret,
+            verify=cfg.verify,
+            ca_file=cfg.ca_file,
+            fingerprint=cfg.fingerprint,
+            timeout_seconds=cfg.timeout_seconds,
+            max_retries=cfg.max_retries,
+            state_dir=self.settings.state_dir,
+        )
+
+    async def _validate_pve_token(
+        self,
+        instance: str | None,
+        token: PVEToken,
+    ) -> TokenState:
+        """Validate ``token`` against the PVE ``instance`` (D026, issue #30).
+
+        Fail-closed and cached per (instance, token-identity):
+
+        * A cached, still-valid entry is returned without a round-trip. The
+          cache key contains the full token identity, so a rotated token is a
+          different key (re-validated immediately) and two clients with
+          different tokens never share an entry or a permission snapshot.
+        * Otherwise one round-trip to ``GET /access/permissions`` plays double
+          duty: a 401 means the token is rejected (fail-closed, no fallback
+          to the configured token); a 403 means the token is valid but lacks
+          ``Sys.Audit`` (a valid identity — the per-token snapshot records the
+          discovery failure and PVE keeps enforcing per call, with the
+          call-time gate applying the fail_open policy); a 200 yields the
+          per-token permission snapshot.
+        * The resulting :class:`TokenState` carries the per-request client
+          (bound to the token); the caller stores it in
+          :data:`pve_scoped_context` so the (unchanged) tool code and
+          :meth:`pve` transparently use the request's credentials.
+        """
+        name = self._instance_name("pve", instance, self.pve_clients)
+        if self._token_cache is None:
+            raise AuthenticationError(
+                f"pve {name}: passthrough validation is unavailable (token cache not initialized)"
+            )
+        cached = await self._token_cache.get(token.key(name))
+        if cached is not None:
+            return cached
+        client = self._scoped_pve(name, token)
+        try:
+            permissions = await client.permissions()
+        except AuthenticationError as exc:
+            await client.aclose()
+            raise AuthenticationError(
+                f"pve {name}: PVE rejected the bearer token {token.token_id} "
+                "(HTTP 401); passthrough mode is fail-closed and does not fall back "
+                "to the configured service token"
+            ) from exc
+        except PermissionDenied:
+            # PVE authenticates before it ACLs, so a 403 proves the token is
+            # valid but lacks Sys.Audit. The identity is trusted; discovery
+            # is recorded as failed and PVE keeps enforcing per call.
+            logger.warning(
+                "pve %s: PVE API token %s lacks Sys.Audit; per-token capability "
+                "discovery unavailable (PVE enforces per call)",
+                name,
+                token.token_id,
+            )
+            snapshot = make_snapshot(
+                instance=name,
+                error="HTTP 403 on /access/permissions (token lacks Sys.Audit); PVE enforces per call",
+            )
+        else:
+            snapshot = make_snapshot(instance=name, permissions=permissions)
+        state = TokenState(instance=name, token=token, client=client, snapshot=snapshot)
+        for evicted in await self._token_cache.put(state):
+            try:
+                await evicted.client.aclose()
+            except Exception:
+                logger.debug("closing evicted per-request PVE client failed", exc_info=True)
+        return state
 
     async def resolve_guest(self, vmid: int, instance: str | None = None) -> dict[str, Any]:
         client = self.pve(instance)
@@ -306,6 +493,21 @@ class PVEHub:
             self.blocked.append(BlockedTool(name, category, f"policy: {decision.reason}"))
             logger.info("tool %s blocked by policy: %s", name, decision.reason)
             return
+        # D026 (issue #30): passthrough mode is PVE-only. A PVE API token is
+        # not valid on the PBS API, and the only credential in a passthrough
+        # request is a PVE token — so no PBS tool is exposed in passthrough
+        # mode (fail-closed; the reason is reported like any other block).
+        if self._passthrough and service == "pbs":
+            self.blocked.append(
+                BlockedTool(
+                    name,
+                    category,
+                    "passthrough: PVE API tokens are not valid on the PBS API "
+                    "(run in static mode for PBS access)",
+                )
+            )
+            logger.info("tool %s blocked: passthrough (PBS)", name)
+            return
         if service == "pve" and not self.pve_clients:
             self.blocked.append(BlockedTool(name, category, "capability: no PVE instance configured"))
             return
@@ -320,7 +522,14 @@ class PVEHub:
                 return
         pve_reqs = tuple(Privilege(priv, path) for priv, path in pve)
         pbs_reqs = tuple(Privilege(priv, path) for priv, path in pbs)
-        if pve_reqs:
+        # D026 (issue #30): in passthrough mode the request's PVE token is
+        # unknown at registration time, so the configured service token's
+        # permission snapshot must not gate tool visibility (it is not the
+        # request's credential). Visibility is therefore not permission-
+        # filtered in passthrough mode; the call-time per-token gate
+        # (check_pve_token_snapshot) is the security boundary and PVE keeps
+        # enforcing every call with the request's own ACL.
+        if pve_reqs and not self._passthrough:
             visible, reason = self.capabilities.visible(kind="pve", requirements=pve_reqs)  # type: ignore[union-attr]
             if not visible:
                 self.blocked.append(BlockedTool(name, category, f"capability: {reason}"))
@@ -434,14 +643,42 @@ class PVEHub:
             status = "ok"
             error: dict[str, Any] | None = None
             response: str | None = None
+            # D026 (issue #30): passthrough request-local state. The reset
+            # token is captured when the validated TokenState is published into
+            # pve_scoped_context (so the unchanged tool code and the pve()
+            # accessor transparently use the request's own PVE API token) and
+            # is undone in the finally block. pve_token_id is the *identity*
+            # (user@realm!tokenid) for the audit entry — never the secret.
+            pve_scoped_token = None
+            pve_token_id: str | None = None
             try:
                 supports_dry_run = "dry_run" in inspect.signature(fn).parameters
-                self.policy.check_call(
-                    name, category, kwargs, dry_run_supported=supports_dry_run
-                )
+                self.policy.check_call(name, category, kwargs, dry_run_supported=supports_dry_run)
                 if pve:
-                    pve_client = self.pve(instance)
-                    self.capabilities.check_pve(pve_client.name, pve, kwargs)  # type: ignore[union-attr]
+                    if self._passthrough:
+                        # D026 (issue #30): the bearer *is* the PVE API token.
+                        # Validate it against the PVE (fail-closed, cached per
+                        # full token identity), publish the resulting
+                        # TokenState so the (unchanged) tool code calls PVE
+                        # with *this* token, then gate on the per-token
+                        # permission snapshot (PVE still enforces per call).
+                        token = self._request_pve_token(ctx)
+                        if token is None:
+                            raise AuthenticationError(
+                                "pve: no PVE API token in the current request; "
+                                "passthrough mode is fail-closed and does not "
+                                "fall back to the configured service token"
+                            )
+                        state = await self._validate_pve_token(instance, token)
+                        pve_scoped_token = pve_scoped_context.set(state)
+                        pve_token_id = token.token_id
+                        pve_client = state.client
+                        self.capabilities.check_pve_token_snapshot(  # type: ignore[union-attr]
+                            state.instance, state.snapshot, pve, kwargs
+                        )
+                    else:
+                        pve_client = self.pve(instance)
+                        self.capabilities.check_pve(pve_client.name, pve, kwargs)  # type: ignore[union-attr]
                     instance = pve_client.name
                 elif pbs:
                     pbs_client = self.pbs(instance)
@@ -473,6 +710,11 @@ class PVEHub:
                 response = fail("internal_error", f"{exc.__class__.__name__}: {exc}")
                 return response
             finally:
+                # D026 (issue #30): release the per-request PVE token from the
+                # request context so a subsequent tool call (same task) cannot
+                # accidentally reuse it.
+                if pve_scoped_token is not None:
+                    pve_scoped_context.reset(pve_scoped_token)
                 duration = int((__import__("time").monotonic() - started) * 1000)
                 # D024 (issue #25): resolve the client address through the
                 # trusted-proxy rules; "unknown" when not resolvable, like
@@ -491,6 +733,10 @@ class PVEHub:
                     result=response,
                     client=client,
                     client_ip=client_ip,
+                    # D026 (issue #30): the PVE API token *identity* used for
+                    # the call (passthrough only; None in static mode). The
+                    # secret is never written.
+                    pve_token=pve_token_id,
                 )
                 # Issue #33: metadata only, never command text or guest output.
                 if should_record_event(category, kwargs):
@@ -499,9 +745,7 @@ class PVEHub:
                         category=category,
                         status=status,
                         client=client,
-                        subjects=derive_subjects(
-                            kwargs, include_path=category != "exec"
-                        ),
+                        subjects=derive_subjects(kwargs, include_path=category != "exec"),
                         summary=event_summary(name, category, status, kwargs),
                         instance=instance if isinstance(instance, str) else None,
                         duration_ms=duration,
@@ -616,6 +860,17 @@ class PVEHub:
                 ],
             },
             "capabilities": self.capabilities.report() if self.capabilities else None,
+            # D026 (issue #30): how the MCP endpoint authenticates callers.
+            # In passthrough mode the PVE API token is the credential (the
+            # per-request validation and its TTL are what matter), so the
+            # configured named-token state is irrelevant and omitted.
+            "auth": {
+                "mode": self.settings.mcp_auth_mode,
+                "required": self.settings.mcp_auth_required,
+                "token_validation_ttl": self.settings.mcp_token_validation_ttl
+                if self.settings.mcp_auth_mode == "passthrough"
+                else None,
+            },
             "shell": shell,
             # Issue #32: state of the memory layer, including the reason when
             # it is disabled (read-only FS, missing permissions, wrong path).
@@ -694,6 +949,70 @@ class BearerAuthMiddleware:
             await self.app(scope, receive, send)
         finally:
             client_context.reset(token)
+
+
+class PassthroughBearerMiddleware:
+    """Structural bearer gate for passthrough mode (D026, issue #30).
+
+    In passthrough mode the *PVE API token* is the credential: there is no
+    named MCP client and no configured MCP bearer to match against. This
+    middleware enforces only the *shape* of the ``Authorization`` header (a
+    well-formed PVE API token) and answers a 401 for a missing or malformed
+    bearer before any PVE round-trip. It does **not** validate the token
+    against PVE — that happens per request in the tool wrapper, where the
+    target PVE instance is known (a PVE token is only meaningful against the
+    PVE that issued it).
+
+    The parsed token is stored in
+    :data:`pvehub_mcp.passthrough.pve_bearer_context` for the request (a
+    same-task convenience); the wrapper re-derives it from the raw HTTP
+    request when the SDK runs the tool in a task other than the
+    middleware's, so the raw request remains the authoritative channel. The
+    client *name* is not resolvable in passthrough mode (no named MCP
+    client), so :data:`pvehub_mcp.clientid.client_context` keeps its
+    ``"unknown"`` default and the PVE token *identity* is carried in the
+    audit's ``pve_token`` field instead.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        *,
+        protected_prefix: str = "/mcp",
+        protected_paths: frozenset[str] = frozenset(),
+    ) -> None:
+        self.app = app
+        self.protected_prefix = protected_prefix
+        self.protected_paths = protected_paths
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if not (path.startswith(self.protected_prefix) or path in self.protected_paths):
+            await self.app(scope, receive, send)
+            return
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        supplied = headers.get(b"authorization", b"").decode("latin-1")
+        token = parse_pve_bearer(supplied)
+        if token is None:
+            response = JSONResponse(
+                {
+                    "error": "unauthorized",
+                    "message": "missing or malformed PVE API token (expected: "
+                    "Bearer <user@realm!tokenid>=<secret>)",
+                },
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            await response(scope, receive, send)
+            return
+        tok = pve_bearer_context.set(token)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            pve_bearer_context.reset(tok)
 
 
 class TrustedProxyMiddleware:
@@ -847,22 +1166,34 @@ def build_http_app(hub: PVEHub) -> Starlette:
 
     app.router.routes.insert(0, Route("/ready", ready, methods=["GET"]))
     app.router.routes.insert(0, Route("/health", health, methods=["GET"]))
-    credentials: dict[str, str] = {}
-    if hub.settings.mcp_auth_token is not None:
-        credentials[LEGACY] = hub.settings.mcp_auth_token.get_secret_value()
-    credentials.update(hub.settings.mcp_auth_tokens)
-    if credentials:
+    if hub._passthrough:
+        # D026 (issue #30): the PVE API token is the credential — there is no
+        # named MCP client and no configured MCP bearer to match. The
+        # structural bearer gate runs on /mcp and /ready; the per-request PVE
+        # validation (fail-closed, per-token cache) happens in the tool
+        # wrapper, where the target PVE instance is known.
         app.add_middleware(
-            BearerAuthMiddleware,
-            credentials=credentials,
+            PassthroughBearerMiddleware,
             protected_prefix="/mcp",
             protected_paths=frozenset({"/ready"}),
         )
     else:
-        logger.warning(
-            "MCP endpoint /mcp is UNAUTHENTICATED (mcp_auth_required=false); "
-            "loopback development setups only - do not expose this port"
-        )
+        credentials: dict[str, str] = {}
+        if hub.settings.mcp_auth_token is not None:
+            credentials[LEGACY] = hub.settings.mcp_auth_token.get_secret_value()
+        credentials.update(hub.settings.mcp_auth_tokens)
+        if credentials:
+            app.add_middleware(
+                BearerAuthMiddleware,
+                credentials=credentials,
+                protected_prefix="/mcp",
+                protected_paths=frozenset({"/ready"}),
+            )
+        else:
+            logger.warning(
+                "MCP endpoint /mcp is UNAUTHENTICATED (mcp_auth_required=false); "
+                "loopback development setups only - do not expose this port"
+            )
     # D024 (issue #25): the trusted-proxy gate is installed *after* the
     # bearer middleware, i.e. as the outermost layer, so a direct request
     # from an untrusted network gets a 403 before any 401.

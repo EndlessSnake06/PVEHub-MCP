@@ -24,6 +24,7 @@ _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 def _expand_env(value: Any) -> Any:
     if isinstance(value, str):
+
         def repl(match: re.Match[str]) -> str:
             return os.environ.get(match.group(1), "")
 
@@ -223,6 +224,20 @@ class Settings(BaseModel):
     #: the middleware as the reserved client ``default``.
     mcp_auth_tokens: dict[str, str] = Field(default_factory=dict)
     mcp_auth_required: bool = True
+    # --- token pass-through (D026, issue #30) ---
+    # "static" (default): the server holds the PVE token (existing behaviour).
+    # "passthrough": the bearer in the Authorization header *is* the PVE API
+    # token; it is validated per request against the target PVE (fail-closed,
+    # no fallback to the configured token) and reused for every PVE call of
+    # that request. Requires at least one PVE instance; on the http
+    # transport it forces mcp_auth_required=true (the token is the
+    # credential, so an unauthenticated /mcp would defeat the contract).
+    mcp_auth_mode: Literal["static", "passthrough"] = "static"
+    #: TTL in seconds of the per-(instance, token) validation cache
+    #: (D026, issue #30). Must be >= 1. The cache is bounded (max 32
+    #: entries); a rotated token is a different key and is re-validated
+    #: immediately.
+    mcp_token_validation_ttl: int = 60
     allowed_hosts: list[str] = Field(default_factory=list)
     # --- trusted proxy (D024, issue #25) ---
     # Comma-separated CIDRs of the reverse proxies in front of the server.
@@ -322,11 +337,40 @@ class Settings(BaseModel):
                         f"named-token for client {name!r} equals mcp_auth_token; "
                         "each token must identify exactly one client"
                     )
+        if self.mcp_token_validation_ttl < 1:
+            raise ValueError("mcp_token_validation_ttl must be at least 1 second")
+        # Passthrough mode (D026, issue #30): the bearer *is* the PVE API
+        # token, so there is nothing to configure on this side — but the
+        # contract only holds if (a) there is a PVE to validate the token
+        # against, (b) the request actually carries the bearer (http only),
+        # and (c) the endpoint is authenticated (the token is the
+        # credential, so an unauthenticated /mcp would defeat the
+        # fail-closed contract).
+        if self.mcp_auth_mode == "passthrough":
+            if not self.pve:
+                raise ValueError(
+                    "mcp_auth_mode='passthrough' requires at least one PVE instance: "
+                    "the bearer is a PVE API token and there is no PVE to validate it "
+                    "against"
+                )
+            if self.transport != "http":
+                raise ValueError(
+                    "mcp_auth_mode='passthrough' requires the http transport: the PVE "
+                    "API token is carried in the HTTP Authorization header, which does "
+                    "not exist on the stdio transport"
+                )
+            if not self.mcp_auth_required:
+                raise ValueError(
+                    "mcp_auth_mode='passthrough' requires mcp_auth_required=true: the "
+                    "PVE API token is the credential, so an unauthenticated /mcp would "
+                    "defeat the fail-closed contract"
+                )
         if (
             self.transport == "http"
             and self.mcp_auth_required
             and self.mcp_auth_token is None
             and not self.mcp_auth_tokens
+            and self.mcp_auth_mode != "passthrough"
         ):
             raise ValueError(
                 "mcp_auth_token or mcp_auth_tokens is required for the http transport; "
@@ -338,10 +382,9 @@ class Settings(BaseModel):
             and not _is_loopback(self.host)
             and self.mcp_auth_token is None
             and not self.mcp_auth_tokens
+            and self.mcp_auth_mode != "passthrough"
         ):
-            raise ValueError(
-                "refusing to bind a non-loopback address without mcp_auth_token/mcp_auth_tokens"
-            )
+            raise ValueError("refusing to bind a non-loopback address without mcp_auth_token/mcp_auth_tokens")
         for group in (self.pve, self.pbs):
             names = [instance.name for instance in group]
             if len(names) != len(set(names)):
@@ -357,9 +400,7 @@ class Settings(BaseModel):
         # bug, not a policy — fail the startup instead of locking everyone
         # out silently.
         if self.require_trusted_proxy and not self.trusted_proxies:
-            raise ValueError(
-                "require_trusted_proxy=true requires a non-empty trusted_proxies list"
-            )
+            raise ValueError("require_trusted_proxy=true requires a non-empty trusted_proxies list")
         if self.trusted_proxies:
             from .proxy import TrustedProxyError, parse_trusted_proxies
 
@@ -452,6 +493,8 @@ def _apply_env(data: dict[str, Any]) -> dict[str, Any]:
         "PVEHUB_MCP_AUTH_TOKEN": ("mcp_auth_token", str),
         "PVEHUB_MCP_AUTH_TOKENS": ("mcp_auth_tokens", _as_token_map),
         "PVEHUB_MCP_AUTH_REQUIRED": ("mcp_auth_required", _as_bool),
+        "PVEHUB_MCP_AUTH_MODE": ("mcp_auth_mode", str),
+        "PVEHUB_MCP_TOKEN_VALIDATION_TTL": ("mcp_token_validation_ttl", int),
         "PVEHUB_ALLOWED_HOSTS": ("allowed_hosts", _as_list),
         "PVEHUB_TRUSTED_PROXIES": ("trusted_proxies", _as_list),
         "PVEHUB_REQUIRE_TRUSTED_PROXY": ("require_trusted_proxy", _as_bool),

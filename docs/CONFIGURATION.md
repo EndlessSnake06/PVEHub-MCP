@@ -79,6 +79,8 @@ PBS instance.
 | `PVEHUB_MCP_AUTH_TOKEN` | unset | Bearer token checked on every `/mcp` request and on `GET /ready`; the http transport needs **at least one** of this / `PVEHUB_MCP_AUTH_TOKENS` (see `PVEHUB_MCP_AUTH_REQUIRED`) | **yes** |
 | `PVEHUB_MCP_AUTH_TOKENS` | unset | Per-client named tokens for audit attribution (D019, issue #21): `name:token,name2:token2`. Name 1-32 chars of `[a-z0-9_-]` (letter/digit first), `default` reserved, token >= 16 chars, must not equal `PVEHUB_MCP_AUTH_TOKEN`. The resolved name is written as `client` into every audit entry; rotating one client's token does not affect the others | **yes** |
 | `PVEHUB_MCP_AUTH_REQUIRED` | `true` | When `true` (default), the http transport refuses to start without `PVEHUB_MCP_AUTH_TOKEN` **or** `PVEHUB_MCP_AUTH_TOKENS`. `false` allows an unauthenticated `/mcp` on loopback binds only (development); non-loopback binds stay refused | no |
+| `PVEHUB_MCP_AUTH_MODE` | `static` | `static` (default): named MCP tokens authenticate the client and the server calls PVE with the configured service token. `passthrough` (D026, issue #30): the `Authorization` bearer **is** the PVE API token and is used as the credential for every PVE call of the request — no configured service token is used (fail-closed). Requires a PVE instance, the `http` transport, `PVEHUB_MCP_AUTH_REQUIRED=true`, and `PVEHUB_MCP_TOKEN_VALIDATION_TTL >= 1`; PBS tools are not registered in this mode. The `PVEHUB_MCP_AUTH_TOKEN(S)` requirement is exempt (the PVE token is the credential) | no |
+| `PVEHUB_MCP_TOKEN_VALIDATION_TTL` | `60` | Passthrough only (D026, issue #30): how long a validated PVE API token (keyed by the full token identity, per PVE instance) is cached before it is re-validated against `GET /access/permissions`. Minimum `1` second. A rotated secret is a different key and is re-validated immediately regardless of this value | no |
 | `PVEHUB_ALLOWED_HOSTS` | empty | Comma-separated `Host`/`Origin` allowlist; enables DNS-rebinding protection. Empty disables that protection | no |
 | `PVEHUB_TRUSTED_PROXIES` | empty | Comma-separated CIDRs (or bare IPs; a bare IP becomes `/32` or `/128`) naming the trusted reverse proxies (D024, issue #25). Empty: `X-Forwarded-For` is **never consulted** and the socket peer is logged. A malformed entry fails startup (fail-loud) | no |
 | `PVEHUB_REQUIRE_TRUSTED_PROXY` | `false` | When `true`, requests to `/mcp` and `/ready` from a peer **outside** `PVEHUB_TRUSTED_PROXIES` get `403` before any authentication (D024, issue #25). Requires a non-empty trust set (validated at startup). `GET /health` stays exempt so the container healthcheck keeps working | no |
@@ -174,6 +176,12 @@ mcp_auth_token: ${PVEHUB_MCP_AUTH_TOKEN}
 mcp_auth_tokens:                # optional, per-client (D019, issue #21);
   webui: ${PVEHUB_WEBUI_TOKEN}  #   rotating webui does not log out the others
 mcp_auth_required: true        # false: unauthenticated /mcp, loopback dev setups only
+# mcp_auth_mode: static        # static (default) | passthrough (D026, issue #30)
+# passthrough: the Authorization bearer IS the PVE API token, used as the
+# credential for every PVE call of the request (no configured service token,
+# fail-closed). Needs a PVE instance, transport: http, mcp_auth_required:
+# true, and mcp_token_validation_ttl >= 1. PBS tools are not registered.
+# mcp_token_validation_ttl: 60 # passthrough only: seconds a validated token is cached
 allowed_hosts: ["pvehub.example.com", "192.168.1.20:8080"]
 # Trusted reverse proxies (D024, issue #25): only if the socket peer is inside
 # this set is X-Forwarded-For consulted for the client_ip audit field. A bare
@@ -260,6 +268,8 @@ allow_insecure_http: false
 | `mcp_auth_token` | string (secret) | unset | constant-time bearer check on `/mcp` and `/ready`; the legacy token, exposed under the reserved client `default` |
 | `mcp_auth_tokens` | map[name] (secret) | unset | per-client named tokens (D019, issue #21); resolved name is written as `client` into every audit entry |
 | `mcp_auth_required` | bool | `true` | http transport refuses to start without `mcp_auth_token` **or** `mcp_auth_tokens`; `false` = unauthenticated loopback development only, non-loopback stays refused |
+| `mcp_auth_mode` | `static` \| `passthrough` | `static` | `passthrough` (D026, issue #30): the `Authorization` bearer is the PVE API token and is the credential for every PVE call of the request (fail-closed, no configured service token). Requires a PVE instance, `transport: http`, `mcp_auth_required: true`, `mcp_token_validation_ttl >= 1`; PBS tools are not registered. Exempts the MCP-bearer requirement (the PVE token is the credential) |
+| `mcp_token_validation_ttl` | int | `60` | Passthrough only: seconds a validated PVE API token (keyed by the full token identity, per instance) is cached before re-validation. Minimum `1`. A rotated secret is a different key and re-validates immediately |
 | `allowed_hosts` | list[str] | `[]` | enables DNS-rebinding protection; must contain the hostnames clients use |
 | `trusted_proxies` | list[str] | `[]` | trusted reverse proxies, CIDRs or bare IPs (bare IP = `/32`/`/128`) (D024, issue #25); malformed entries fail startup. Empty: `X-Forwarded-For` is never consulted, the socket peer is logged |
 | `require_trusted_proxy` | bool | `false` | 403 gate on `/mcp` and `/ready` for peers outside `trusted_proxies`, before authentication; requires a non-empty `trusted_proxies`; `/health` exempt (D021, D024) |
@@ -470,8 +480,15 @@ call:
 - `status` is `ok`, `denied` (policy/confirm) or `error`.
 - `client` names the bearer that ran the call (D019, issue #21): the resolved name
   of a `PVEHUB_MCP_AUTH_TOKENS` entry, `default` for the legacy token, or `unknown`
-  for stdio / unauthenticated loopback. The field is always present, so log consumers
-  can rely on the schema.
+  for stdio / unauthenticated loopback / passthrough. The field is always present, so
+  log consumers can rely on the schema.
+- `pve_token` (passthrough only, D026, issue #30) names the PVE API token that ran
+  the call: the token **identity** `user@realm!tokenid` — never the secret. It is the
+  empty string in static mode and for every non-PVE tool call. In passthrough mode
+  the per-client MCP token is not used (the PVE token is the credential), so
+  `client` is `unknown` there; `pve_token` carries the attribution instead. The
+  existing secret-redaction applies to this field as well, so the token secret never
+  reaches the log.
 - `client_ip` is the resolved source address (D024, issue #25): when the socket peer
   is a configured trusted proxy, the client resolved from `X-Forwarded-For` (the
   rightmost entry *outside* the trusted set — a forged entry cannot change the
