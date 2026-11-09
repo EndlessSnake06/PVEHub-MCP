@@ -3,6 +3,37 @@
 All notable changes to this project are documented here. Format: Keep a Changelog;
 versioning: Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- Trusted-proxy support and client-IP audit attribution (D024, issue #25):
+  `PVEHUB_TRUSTED_PROXIES` / `trusted_proxies` (comma-separated CIDRs, or bare IPs
+  treated as `/32`/`/128`) names the trusted reverse proxies; `PVEHUB_REQUIRE_TRUSTED_PROXY`
+  / `require_trusted_proxy` (default `false`, validated to require a non-empty trust
+  set) adds a `403` gate on `/mcp` and `/ready` for peers outside the trust set,
+  **before** any authentication (`/health` stays exempt so container healthchecks keep
+  working). New `client_ip` field in **every** audit entry (always present, `unknown`
+  when unresolvable): for a trusted proxy peer, the client resolved from
+  `X-Forwarded-For` (the rightmost entry *outside* the trust set — a forged chain
+  cannot change the outcome for an untrusted peer, who is attributed to the socket
+  peer); otherwise the socket peer. New dependency-free module `pvehub_mcp/proxy.py`
+  (strict startup validation of the trust set); `uvicorn` runs with
+  `proxy_headers=False` so the forwarded-header policy is explicit and testable.
+  Malformed trust-set entries fail at startup instead of degrading silently.
+- `tests/test_trusted_proxy.py`: the forgery table (10 cases), config validation,
+  the 403 middleware at ASGI level, plus end-to-end tests through a real uvicorn
+  server (full MCP session behind a "local reverse proxy", `127.0.0.1/32` trusted)
+  asserting the resolved client IP in the audit log, and a default-configuration run
+  asserting that a forged `X-Forwarded-For` is ignored.
+
+### Notes
+
+- Default configuration is **unchanged**: without `trusted_proxies`, `X-Forwarded-For`
+  is never consulted and the socket peer is logged — existing proxy-less and
+  proxy-fronted deployments behave exactly as before. The audit schema gains one
+  always-present field (`client_ip`); existing consumers are unaffected.
+
 ## [0.1.1] — 2026-11-08
 
 ### Added

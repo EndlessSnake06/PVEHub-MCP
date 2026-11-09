@@ -80,6 +80,8 @@ PBS instance.
 | `PVEHUB_MCP_AUTH_TOKENS` | unset | Per-client named tokens for audit attribution (D019, issue #21): `name:token,name2:token2`. Name 1-32 chars of `[a-z0-9_-]` (letter/digit first), `default` reserved, token >= 16 chars, must not equal `PVEHUB_MCP_AUTH_TOKEN`. The resolved name is written as `client` into every audit entry; rotating one client's token does not affect the others | **yes** |
 | `PVEHUB_MCP_AUTH_REQUIRED` | `true` | When `true` (default), the http transport refuses to start without `PVEHUB_MCP_AUTH_TOKEN` **or** `PVEHUB_MCP_AUTH_TOKENS`. `false` allows an unauthenticated `/mcp` on loopback binds only (development); non-loopback binds stay refused | no |
 | `PVEHUB_ALLOWED_HOSTS` | empty | Comma-separated `Host`/`Origin` allowlist; enables DNS-rebinding protection. Empty disables that protection | no |
+| `PVEHUB_TRUSTED_PROXIES` | empty | Comma-separated CIDRs (or bare IPs; a bare IP becomes `/32` or `/128`) naming the trusted reverse proxies (D024, issue #25). Empty: `X-Forwarded-For` is **never consulted** and the socket peer is logged. A malformed entry fails startup (fail-loud) | no |
+| `PVEHUB_REQUIRE_TRUSTED_PROXY` | `false` | When `true`, requests to `/mcp` and `/ready` from a peer **outside** `PVEHUB_TRUSTED_PROXIES` get `403` before any authentication (D024, issue #25). Requires a non-empty trust set (validated at startup). `GET /health` stays exempt so the container healthcheck keeps working | no |
 | `PVEHUB_POLICY_FILE` | `/config/policy.yaml` | Path to the policy YAML | no |
 | `PVEHUB_AUDIT_LOG` | `/data/audit.jsonl` | JSONL audit path. Disable with YAML `audit_log: null`; an empty env value is ignored | no |
 | `PVEHUB_AUDIT_INCLUDE_RESULTS` | `false` | Also log tool result bodies (can contain secrets) | no |
@@ -173,6 +175,13 @@ mcp_auth_tokens:                # optional, per-client (D019, issue #21);
   webui: ${PVEHUB_WEBUI_TOKEN}  #   rotating webui does not log out the others
 mcp_auth_required: true        # false: unauthenticated /mcp, loopback dev setups only
 allowed_hosts: ["pvehub.example.com", "192.168.1.20:8080"]
+# Trusted reverse proxies (D024, issue #25): only if the socket peer is inside
+# this set is X-Forwarded-For consulted for the client_ip audit field. A bare
+# IP is a /32. Malformed entries fail startup.
+trusted_proxies: ["10.200.0.0/16"]
+# true: 403 on /mcp and /ready for peers outside trusted_proxies (before auth).
+# Requires a non-empty trusted_proxies. /health stays exempt (D021).
+require_trusted_proxy: false
 
 pve:
   - name: pve1
@@ -240,6 +249,8 @@ allow_insecure_http: false
 | `mcp_auth_tokens` | map[name] (secret) | unset | per-client named tokens (D019, issue #21); resolved name is written as `client` into every audit entry |
 | `mcp_auth_required` | bool | `true` | http transport refuses to start without `mcp_auth_token` **or** `mcp_auth_tokens`; `false` = unauthenticated loopback development only, non-loopback stays refused |
 | `allowed_hosts` | list[str] | `[]` | enables DNS-rebinding protection; must contain the hostnames clients use |
+| `trusted_proxies` | list[str] | `[]` | trusted reverse proxies, CIDRs or bare IPs (bare IP = `/32`/`/128`) (D024, issue #25); malformed entries fail startup. Empty: `X-Forwarded-For` is never consulted, the socket peer is logged |
+| `require_trusted_proxy` | bool | `false` | 403 gate on `/mcp` and `/ready` for peers outside `trusted_proxies`, before authentication; requires a non-empty `trusted_proxies`; `/health` exempt (D021, D024) |
 | `pve` | list[instance] | `[]` | at least one PVE or PBS instance required |
 | `pbs` | list[instance] | `[]` | |
 | `ssh` | mapping | see below | optional; without it host/LXC/file tools stay hidden |
@@ -428,7 +439,7 @@ tools exist in the current tree.
 call:
 
 ```json
-{"ts":"2026-11-07T10:00:00Z","tool":"pve_api_call","category":"generic","status":"ok","instance":"pve1","client":"webui","target":"path=/nodes","params":{"path":"/nodes"},"duration_ms":42,"output_bytes":512}
+{"ts":"2026-11-07T10:00:00Z","tool":"pve_api_call","category":"generic","status":"ok","instance":"pve1","client":"webui","client_ip":"192.168.1.50","target":"path=/nodes","params":{"path":"/nodes"},"duration_ms":42,"output_bytes":512}
 ```
 
 - `status` is `ok`, `denied` (policy/confirm) or `error`.
@@ -436,6 +447,12 @@ call:
   of a `PVEHUB_MCP_AUTH_TOKENS` entry, `default` for the legacy token, or `unknown`
   for stdio / unauthenticated loopback. The field is always present, so log consumers
   can rely on the schema.
+- `client_ip` is the resolved source address (D024, issue #25): when the socket peer
+  is a configured trusted proxy, the client resolved from `X-Forwarded-For` (the
+  rightmost entry *outside* the trusted set — a forged entry cannot change the
+  outcome for an untrusted peer, for whom the socket peer is logged); otherwise the
+  socket peer. Always present; `unknown` when no address is resolvable. See
+  `docs/DECISIONS.md` D024 for the trust model and the forgery rules.
 - `target` keeps the legacy single-key `key=value` string for one key; with two or
   more target keys it is a `{key: "key=value"}` dict so no targeting is lost (D023,
   issue #18). Every value is redacted the same way as everything else.
