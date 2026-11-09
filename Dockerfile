@@ -45,7 +45,7 @@ LABEL org.opencontainers.image.title="PVEHub-MCP" \
       org.opencontainers.image.description="MCP server for Proxmox VE and Proxmox Backup Server" \
       org.opencontainers.image.version="0.1.0" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.source="https://git.mls4tech.net/admin/PVEHub-MCP"
+      org.opencontainers.image.source="https://github.com/EndlessSnake06/PVEHub-MCP"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
