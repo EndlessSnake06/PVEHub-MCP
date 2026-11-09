@@ -493,6 +493,59 @@ maps the token's effective privileges onto the declared tool requirements
   PVE `VM.GuestAgent.Unrestricted`, `VM.GuestAgent.FileRead`, `VM.GuestAgent.FileWrite`,
   `VM.GuestAgent.Audit`.
 
+## Reverse proxy (trusted proxies, D024, issue #25)
+
+When the server sits behind a reverse proxy (Caddy, Traefik, nginx), the
+socket peer of every request is the proxy. Two settings control what the
+server does with that (see `docs/DECISIONS.md` D024):
+
+* `trusted_proxies` (`PVEHUB_TRUSTED_PROXIES`): the proxy's network(s), as
+  CIDRs. A bare IP is a /32. Only for a peer inside this set is
+  `X-Forwarded-For` consulted to resolve the client address written as
+  `client_ip` into the audit log; for every other peer the socket address
+  is logged — a forged header can never change that.
+* `require_trusted_proxy` (`PVEHUB_REQUIRE_TRUSTED_PROXY`, default
+  `false`): `403` on `/mcp` and `/ready` for any peer outside the set,
+  **before** authentication. This is how you close the compose port
+  (`"8080:8080"`) to direct, non-proxy access. `GET /health` stays exempt
+  (container healthchecks).
+
+Caddy example (the proxy terminates TLS; the server behind it is plain
+HTTP on the compose network, and forwards the real client):
+
+```caddy
+pvehub.example.com {
+    tls internal
+    reverse_proxy pvehub:8080 {
+        # Caddy adds the client to X-Forwarded-For (it does not replace an
+        # existing chain). The server resolves the client as the rightmost
+        # entry outside trusted_proxies.
+    }
+}
+```
+
+```yaml
+# config.yaml — the proxy's compose network, nothing wider
+trusted_proxies: ["172.18.0.0/16"]
+require_trusted_proxy: true
+```
+
+**Interaction with `allowed_hosts` (DNS-rebinding protection):** the SDK
+checks the `Host` header of every `/mcp` request. A proxy that *rewrites*
+`Host` to the upstream address (some do this by default) therefore breaks
+the allowlist — requests are rejected with a transport-security error.
+Keep the external hostname as the forwarded `Host` and list that hostname
+in `PVEHUB_ALLOWED_HOSTS`; do not add internal addresses to the allowlist
+to make a Host-rewriting proxy work.
+
+**Forwarded headers and `proxy_headers`:** the server runs uvicorn with
+`proxy_headers=False` on purpose — the forwarded-header policy is explicit
+(403 gate + rightmost-untrusted resolution in `pvehub_mcp/proxy.py`), not
+the framework's implicit one (whose default `forwarded_allow_ips=127.0.0.1`
+is exactly the silent pitfall this setting replaces: a proxy on a bridge
+IP would be ignored by the implicit policy). `X-Forwarded-Proto` is not
+read; TLS termination belongs to the proxy.
+
 ## Container notes
 
 - Writable paths: `/data` (named volume). `/config` and `/ssh` are mounted read-only.
