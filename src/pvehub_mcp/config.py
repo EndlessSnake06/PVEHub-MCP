@@ -224,6 +224,15 @@ class Settings(BaseModel):
     mcp_auth_tokens: dict[str, str] = Field(default_factory=dict)
     mcp_auth_required: bool = True
     allowed_hosts: list[str] = Field(default_factory=list)
+    # --- trusted proxy (D024, issue #25) ---
+    # Comma-separated CIDRs of the reverse proxies in front of the server.
+    # Empty = no trusted proxy: X-Forwarded-For is never consulted and the
+    # direct TCP peer is attributed (default, behaviour unchanged).
+    trusted_proxies: list[str] = Field(default_factory=list)
+    # 403 for every /mcp and /ready request that does not arrive via a
+    # trusted proxy (e.g. the container bridge network). Implies a
+    # non-empty trusted_proxies list (validated).
+    require_trusted_proxy: bool = False
 
     pve: list[PVEInstance] = Field(default_factory=list)
     pbs: list[PBSInstance] = Field(default_factory=list)
@@ -324,6 +333,21 @@ class Settings(BaseModel):
             raise ValueError("audit_max_bytes must be at least 1024")
         if self.audit_keep < 1:
             raise ValueError("audit_keep must be at least 1")
+        # Trusted proxy (D024, issue #25): every entry must be a valid CIDR
+        # or IP, and a 403-only deployment without any trusted peer is a
+        # bug, not a policy — fail the startup instead of locking everyone
+        # out silently.
+        if self.require_trusted_proxy and not self.trusted_proxies:
+            raise ValueError(
+                "require_trusted_proxy=true requires a non-empty trusted_proxies list"
+            )
+        if self.trusted_proxies:
+            from .proxy import TrustedProxyError, parse_trusted_proxies
+
+            try:
+                parse_trusted_proxies(",".join(self.trusted_proxies))
+            except TrustedProxyError as exc:
+                raise ValueError(f"invalid trusted_proxies: {exc}") from exc
         return self
 
     def pve_instance(self, name: str | None) -> PVEInstance:
@@ -387,6 +411,8 @@ def _apply_env(data: dict[str, Any]) -> dict[str, Any]:
         "PVEHUB_MCP_AUTH_TOKENS": ("mcp_auth_tokens", _as_token_map),
         "PVEHUB_MCP_AUTH_REQUIRED": ("mcp_auth_required", _as_bool),
         "PVEHUB_ALLOWED_HOSTS": ("allowed_hosts", _as_list),
+        "PVEHUB_TRUSTED_PROXIES": ("trusted_proxies", _as_list),
+        "PVEHUB_REQUIRE_TRUSTED_PROXY": ("require_trusted_proxy", _as_bool),
         "PVEHUB_POLICY_FILE": ("policy_file", str),
         "PVEHUB_AUDIT_LOG": ("audit_log", str),
         "PVEHUB_AUDIT_INCLUDE_RESULTS": ("audit_include_results", _as_bool),
